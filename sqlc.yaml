@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema: "internal/db/schema.sql"
+    queries: "internal/db/queries"
+    gen:
+      go:
+        package: "dbgen"
+        out: "internal/db/gen"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true
+        emit_enum_valid_method: true

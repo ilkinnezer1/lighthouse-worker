@@ -9,10 +9,15 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ilkinnezer1/lighthouse-worker/internal/config"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
+	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/httpx"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/queue"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/redisx"
 )
 
@@ -53,22 +58,19 @@ func main() {
 	defer func() { _ = rdb.Close() }()
 	boot.Info("redis connected")
 
+	runner := pipeline.New(dbgen.New(pool), root)
 	srv := httpx.New(cfg.HTTPAddr, root)
-	httpDone := make(chan error, 1)
-	go func() { httpDone <- srv.Run(ctx) }()
+	consumer := queue.New(rdb, root, runner.Run)
 
 	boot.Info("ready")
 
-	select {
-	case <-ctx.Done():
-		boot.Info("shutting down")
-		if err := <-httpDone; err != nil {
-			boot.Error("http shutdown", slog.Any("err", err))
-		}
-	case err := <-httpDone:
-		if err != nil {
-			boot.Error("http server failed", slog.Any("err", err))
-			os.Exit(1)
-		}
+	g, gCtx := errgroup.WithContext(ctx)
+	g.Go(func() error { return srv.Run(gCtx) })
+	g.Go(func() error { return consumer.Run(gCtx) })
+
+	if err := g.Wait(); err != nil {
+		boot.Error("stopped with error", slog.Any("err", err))
+		os.Exit(1)
 	}
+	boot.Info("shutdown complete")
 }

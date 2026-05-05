@@ -1,0 +1,642 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict nnz79svnZW7d5Ny3h00BL9v3wyy4SgTycZT97sxvKucieEIaJldfe3qne2Y1JH1
+
+-- Dumped from database version 16.10
+-- Dumped by pg_dump version 16.10
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- Name: public; Type: SCHEMA; Schema: -; Owner: -
+--
+
+-- *not* creating schema, since initdb creates it
+
+
+--
+-- Name: citext; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+
+
+--
+-- Name: DeploymentStageStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."DeploymentStageStatus" AS ENUM (
+    'PENDING',
+    'RUNNING',
+    'SUCCEEDED',
+    'FAILED',
+    'SKIPPED'
+);
+
+
+--
+-- Name: DeploymentStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."DeploymentStatus" AS ENUM (
+    'QUEUED',
+    'CLONING',
+    'BUILDING',
+    'PUSHING',
+    'STARTING',
+    'RUNNING',
+    'SUCCEEDED',
+    'FAILED',
+    'CANCELLED'
+);
+
+
+--
+-- Name: EnvironmentType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."EnvironmentType" AS ENUM (
+    'PRODUCTION',
+    'PREVIEW',
+    'MANUAL'
+);
+
+
+--
+-- Name: GitCredentialKind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."GitCredentialKind" AS ENUM (
+    'SSH_KEY',
+    'PAT',
+    'GITHUB_APP_INSTALL'
+);
+
+
+--
+-- Name: IdentityProvider; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."IdentityProvider" AS ENUM (
+    'PASSWORD',
+    'GITHUB',
+    'GOOGLE',
+    'ATLASSIAN'
+);
+
+
+--
+-- Name: UserRole; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."UserRole" AS ENUM (
+    'USER',
+    'ADMIN'
+);
+
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: _prisma_migrations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public._prisma_migrations (
+    id character varying(36) NOT NULL,
+    checksum character varying(64) NOT NULL,
+    finished_at timestamp with time zone,
+    migration_name character varying(255) NOT NULL,
+    logs text,
+    rolled_back_at timestamp with time zone,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    applied_steps_count integer DEFAULT 0 NOT NULL
+);
+
+
+--
+-- Name: audit_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audit_log (
+    id bigint NOT NULL,
+    actor_user_id uuid,
+    action text NOT NULL,
+    resource_type text,
+    resource_id uuid,
+    before_json jsonb,
+    after_json jsonb,
+    ip inet,
+    user_agent text,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.audit_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
+
+
+--
+-- Name: deployment_stages; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deployment_stages (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deployment_id uuid NOT NULL,
+    name text NOT NULL,
+    status public."DeploymentStageStatus" DEFAULT 'PENDING'::public."DeploymentStageStatus" NOT NULL,
+    ordinal integer NOT NULL,
+    started_at timestamp(3) with time zone,
+    finished_at timestamp(3) with time zone,
+    error_json jsonb
+);
+
+
+--
+-- Name: deployments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deployments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    triggered_by_user_id uuid,
+    status public."DeploymentStatus" DEFAULT 'QUEUED'::public."DeploymentStatus" NOT NULL,
+    commit_sha text,
+    commit_message text,
+    commit_author text,
+    started_at timestamp(3) with time zone,
+    finished_at timestamp(3) with time zone,
+    last_heartbeat_at timestamp(3) with time zone,
+    error_summary text,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: environments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.environments (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    project_id uuid NOT NULL,
+    name text NOT NULL,
+    type public."EnvironmentType" NOT NULL,
+    branch text,
+    subdomain text NOT NULL,
+    custom_domain text,
+    env_vars_enc text,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
+-- Name: event_outbox; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.event_outbox (
+    id bigint NOT NULL,
+    type text NOT NULL,
+    user_id uuid,
+    payload jsonb NOT NULL,
+    drained_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: event_outbox_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.event_outbox_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: event_outbox_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.event_outbox_id_seq OWNED BY public.event_outbox.id;
+
+
+--
+-- Name: git_credentials; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.git_credentials (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    kind public."GitCredentialKind" NOT NULL,
+    label text,
+    secret_enc text NOT NULL,
+    fingerprint text,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
+-- Name: projects; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.projects (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    owner_id uuid NOT NULL,
+    name text NOT NULL,
+    slug text NOT NULL,
+    subdomain text NOT NULL,
+    repo_url text NOT NULL,
+    default_branch text DEFAULT 'main'::text NOT NULL,
+    build_config jsonb DEFAULT '{}'::jsonb NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL,
+    deleted_at timestamp(3) with time zone
+);
+
+
+--
+-- Name: services; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.services (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deployment_id uuid NOT NULL,
+    name text NOT NULL,
+    image text,
+    container_id text,
+    host text,
+    port integer,
+    is_web boolean DEFAULT false NOT NULL,
+    status text
+);
+
+
+--
+-- Name: user_identities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_identities (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    provider public."IdentityProvider" NOT NULL,
+    provider_user_id text NOT NULL,
+    provider_email text,
+    access_token_enc text,
+    refresh_token_enc text,
+    token_expires_at timestamp(3) with time zone,
+    scopes text[],
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
+-- Name: users; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.users (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    email public.citext NOT NULL,
+    email_verified_at timestamp(3) with time zone,
+    password_hash text,
+    display_name text,
+    role public."UserRole" DEFAULT 'USER'::public."UserRole" NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    last_login_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
+-- Name: audit_log id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_log ALTER COLUMN id SET DEFAULT nextval('public.audit_log_id_seq'::regclass);
+
+
+--
+-- Name: event_outbox id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.event_outbox ALTER COLUMN id SET DEFAULT nextval('public.event_outbox_id_seq'::regclass);
+
+
+--
+-- Name: _prisma_migrations _prisma_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public._prisma_migrations
+    ADD CONSTRAINT _prisma_migrations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: deployment_stages deployment_stages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployment_stages
+    ADD CONSTRAINT deployment_stages_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: deployments deployments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployments
+    ADD CONSTRAINT deployments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: environments environments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.environments
+    ADD CONSTRAINT environments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: event_outbox event_outbox_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.event_outbox
+    ADD CONSTRAINT event_outbox_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: git_credentials git_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.git_credentials
+    ADD CONSTRAINT git_credentials_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.projects
+    ADD CONSTRAINT projects_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: services services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.services
+    ADD CONSTRAINT services_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_identities user_identities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_identities
+    ADD CONSTRAINT user_identities_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: audit_log_actor_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_log_actor_user_id_created_at_idx ON public.audit_log USING btree (actor_user_id, created_at DESC);
+
+
+--
+-- Name: deployment_stages_deployment_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deployment_stages_deployment_id_idx ON public.deployment_stages USING btree (deployment_id);
+
+
+--
+-- Name: deployment_stages_deployment_id_ordinal_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deployment_stages_deployment_id_ordinal_key ON public.deployment_stages USING btree (deployment_id, ordinal);
+
+
+--
+-- Name: deployments_environment_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deployments_environment_id_created_at_idx ON public.deployments USING btree (environment_id, created_at DESC);
+
+
+--
+-- Name: deployments_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deployments_status_idx ON public.deployments USING btree (status) WHERE (status = ANY (ARRAY['QUEUED'::public."DeploymentStatus", 'CLONING'::public."DeploymentStatus", 'BUILDING'::public."DeploymentStatus", 'PUSHING'::public."DeploymentStatus", 'STARTING'::public."DeploymentStatus"]));
+
+
+--
+-- Name: environments_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX environments_project_id_idx ON public.environments USING btree (project_id);
+
+
+--
+-- Name: environments_project_id_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX environments_project_id_name_key ON public.environments USING btree (project_id, name);
+
+
+--
+-- Name: event_outbox_drained_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX event_outbox_drained_at_idx ON public.event_outbox USING btree (drained_at) WHERE (drained_at IS NULL);
+
+
+--
+-- Name: git_credentials_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX git_credentials_user_id_idx ON public.git_credentials USING btree (user_id);
+
+
+--
+-- Name: projects_owner_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX projects_owner_id_idx ON public.projects USING btree (owner_id);
+
+
+--
+-- Name: projects_owner_id_slug_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX projects_owner_id_slug_key ON public.projects USING btree (owner_id, slug);
+
+
+--
+-- Name: projects_owner_id_subdomain_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX projects_owner_id_subdomain_key ON public.projects USING btree (owner_id, subdomain);
+
+
+--
+-- Name: services_deployment_id_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX services_deployment_id_name_key ON public.services USING btree (deployment_id, name);
+
+
+--
+-- Name: user_identities_provider_provider_user_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX user_identities_provider_provider_user_id_key ON public.user_identities USING btree (provider, provider_user_id);
+
+
+--
+-- Name: user_identities_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX user_identities_user_id_idx ON public.user_identities USING btree (user_id);
+
+
+--
+-- Name: users_email_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email);
+
+
+--
+-- Name: audit_log audit_log_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: deployment_stages deployment_stages_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployment_stages
+    ADD CONSTRAINT deployment_stages_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: deployments deployments_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployments
+    ADD CONSTRAINT deployments_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: deployments deployments_triggered_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployments
+    ADD CONSTRAINT deployments_triggered_by_user_id_fkey FOREIGN KEY (triggered_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: environments environments_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.environments
+    ADD CONSTRAINT environments_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.projects(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: event_outbox event_outbox_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.event_outbox
+    ADD CONSTRAINT event_outbox_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: git_credentials git_credentials_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.git_credentials
+    ADD CONSTRAINT git_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: projects projects_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.projects
+    ADD CONSTRAINT projects_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: services services_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.services
+    ADD CONSTRAINT services_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: user_identities user_identities_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_identities
+    ADD CONSTRAINT user_identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict nnz79svnZW7d5Ny3h00BL9v3wyy4SgTycZT97sxvKucieEIaJldfe3qne2Y1JH1
+
