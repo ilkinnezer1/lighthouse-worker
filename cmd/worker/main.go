@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/client"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/config"
@@ -16,9 +17,11 @@ import (
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/httpx"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/queue"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/redisx"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
 )
 
 func main() {
@@ -58,7 +61,24 @@ func main() {
 	defer func() { _ = rdb.Close() }()
 	boot.Info("redis connected")
 
-	runner := pipeline.New(dbgen.New(pool), root)
+	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		boot.Error("docker connect failed", slog.Any("err", err))
+		os.Exit(1)
+	}
+	defer func() { _ = docker.Close() }()
+	boot.Info("docker connected")
+
+	q := dbgen.New(pool)
+	logs := logstream.New(rdb)
+	stageList := []pipeline.Stage{
+		stages.NewClone(logs),
+		stages.NewBuild(logs),
+		stages.NewRun(docker, logs, q),
+	}
+	pipe := pipeline.NewPipeline(q, root, stageList)
+	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir)
+
 	srv := httpx.New(cfg.HTTPAddr, root)
 	consumer := queue.New(rdb, root, runner.Run)
 

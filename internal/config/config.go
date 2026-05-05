@@ -14,6 +14,7 @@ type Config struct {
 	MasterEncryptionKey string
 	LogLevel            string
 	HTTPAddr            string
+	WorkDir             string
 }
 
 func Load() (*Config, error) {
@@ -25,6 +26,7 @@ func Load() (*Config, error) {
 		MasterEncryptionKey: os.Getenv("MASTER_ENCRYPTION_KEY"),
 		LogLevel:            getEnv("LOG_LEVEL", "info"),
 		HTTPAddr:            getEnv("HTTP_ADDR", ":8081"),
+		WorkDir:             getEnv("WORK_DIR", "./data/deployments"),
 	}
 
 	var missing []string

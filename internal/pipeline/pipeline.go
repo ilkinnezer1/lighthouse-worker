@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -11,51 +12,151 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
-// Runner executes one deployment from queue pickup to completion.
-type Runner struct {
-	q   *dbgen.Queries
-	log *slog.Logger
+type Pipeline struct {
+	q      *dbgen.Queries
+	log    *slog.Logger
+	stages []Stage
 }
 
-func New(q *dbgen.Queries, log *slog.Logger) *Runner {
-	return &Runner{
-		q:   q,
-		log: logger.Ctx(log, "Pipeline"),
+func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage) *Pipeline {
+	return &Pipeline{
+		q:      q,
+		log:    logger.Ctx(log, "Pipeline"),
+		stages: stages,
 	}
 }
 
-// Run is the queue.Handler for one job. Returning nil triggers XACK.
-func (r *Runner) Run(ctx context.Context, deploymentID string) error {
-	row, err := r.lookup(ctx, deploymentID)
-	if err != nil {
+// Execute Status writes happen before the work, so a crash mid-stage leaves the row
+// in the correct in-flight state for the reaper.
+func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
+	hbCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go runHeartbeat(hbCtx, p.q, dep.ID, p.log)
+
+	id := depUUID(dep.ID)
+	if err := p.q.StartDeployment(ctx, id); err != nil {
+		return fmt.Errorf("mark started: %w", err)
+	}
+
+	for _, stage := range p.stages {
+		if err := p.runStage(ctx, dep, stage); err != nil {
+			// markFailed error = infra problem worth retrying (caller leaves in PEL).
+			// Stage error with markFailed success = recorded; ACK and stop.
+			if markErr := p.markFailed(ctx, dep, stage.Name(), err); markErr != nil {
+				return markErr
+			}
+			if outboxErr := emitDeployFailed(ctx, p.q, dep, stage.Name(), err); outboxErr != nil {
+				p.log.Warn("outbox failed event", slog.Any("err", outboxErr))
+			}
+			return nil
+		}
+	}
+
+	if err := p.markSucceeded(ctx, dep); err != nil {
 		return err
 	}
-
-	r.log.Info("picked up job",
-		slog.String("deploymentId", deploymentID),
-		slog.String("repo", row.RepoUrl),
-		slog.String("branch", branchOrDefault(row)),
-		slog.String("subdomain", row.Subdomain),
-	)
+	if err := emitDeploySucceeded(ctx, p.q, dep); err != nil {
+		p.log.Warn("outbox succeeded event", slog.Any("err", err))
+	}
 	return nil
 }
 
-func (r *Runner) lookup(ctx context.Context, deploymentID string) (dbgen.GetDeploymentForJobRow, error) {
-	var depUUID pgtype.UUID
-	if err := depUUID.Scan(deploymentID); err != nil {
-		return dbgen.GetDeploymentForJobRow{}, fmt.Errorf("parse uuid %q: %w", deploymentID, err)
+func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error {
+	name := s.Name()
+	id := depUUID(dep.ID)
+	log := p.log.With(slog.String("stage", name), slog.String("deploymentId", dep.ID))
+
+	if next, ok := deploymentStatusFor(name); ok {
+		err := p.q.TransitionDeploymentStatus(ctx, dbgen.TransitionDeploymentStatusParams{
+			ID:     id,
+			Status: next,
+		})
+		if err != nil {
+			return fmt.Errorf("transition deployment to %s: %w", next, err)
+		}
 	}
-	row, err := r.q.GetDeploymentForJob(ctx, depUUID)
+
+	if err := p.q.StartStage(ctx, dbgen.StartStageParams{DeploymentID: id, Name: name}); err != nil {
+		return fmt.Errorf("mark stage running: %w", err)
+	}
+
+	log.Info("stage started")
+	if err := s.Run(ctx, dep); err != nil {
+		// best-effort write; if this also fails, the original error wins
+		_ = p.q.FinishStage(ctx, dbgen.FinishStageParams{
+			DeploymentID: id,
+			Name:         name,
+			Status:       dbgen.DeploymentStageStatusFAILED,
+			ErrorJson:    errorJSON(err),
+		})
+		log.Error("stage failed", slog.Any("err", err))
+		return err
+	}
+
+	err := p.q.FinishStage(ctx, dbgen.FinishStageParams{
+		DeploymentID: id,
+		Name:         name,
+		Status:       dbgen.DeploymentStageStatusSUCCEEDED,
+	})
 	if err != nil {
-		return dbgen.GetDeploymentForJobRow{}, fmt.Errorf("lookup deployment: %w", err)
+		return fmt.Errorf("mark stage succeeded: %w", err)
 	}
-	return row, nil
+	log.Info("stage completed")
+	return nil
 }
 
-// branchOrDefault returns the environment-specific branch if set.
-func branchOrDefault(row dbgen.GetDeploymentForJobRow) string {
-	if row.Branch != nil && *row.Branch != "" {
-		return *row.Branch
+func (p *Pipeline) markFailed(ctx context.Context, dep *Deployment, stageName string, runErr error) error {
+	summary := fmt.Sprintf("%s: %s", stageName, runErr.Error())
+	err := p.q.FinishDeployment(ctx, dbgen.FinishDeploymentParams{
+		ID:           depUUID(dep.ID),
+		Status:       dbgen.DeploymentStatusFAILED,
+		ErrorSummary: &summary,
+	})
+	if err != nil {
+		p.log.Error("mark deployment failed",
+			slog.String("deploymentId", dep.ID),
+			slog.Any("err", err),
+		)
+		return fmt.Errorf("mark deployment failed: %w", err)
 	}
-	return row.DefaultBranch
+	return nil
+}
+
+func (p *Pipeline) markSucceeded(ctx context.Context, dep *Deployment) error {
+	err := p.q.FinishDeployment(ctx, dbgen.FinishDeploymentParams{
+		ID:     depUUID(dep.ID),
+		Status: dbgen.DeploymentStatusSUCCEEDED,
+	})
+	if err != nil {
+		return fmt.Errorf("mark deployment succeeded: %w", err)
+	}
+	p.log.Info("deployment succeeded", slog.String("deploymentId", dep.ID))
+	return nil
+}
+
+func deploymentStatusFor(stageName string) (dbgen.DeploymentStatus, bool) {
+	switch stageName {
+	case "clone":
+		return dbgen.DeploymentStatusCLONING, true
+	case "build":
+		return dbgen.DeploymentStatusBUILDING, true
+	case "run":
+		return dbgen.DeploymentStatusSTARTING, true
+	}
+	return "", false
+}
+
+// UUID was validated at queue intake; can't fail here.
+func depUUID(id string) pgtype.UUID {
+	var u pgtype.UUID
+	_ = u.Scan(id)
+	return u
+}
+
+func errorJSON(err error) []byte {
+	if err == nil {
+		return nil
+	}
+	body, _ := json.Marshal(map[string]string{"message": err.Error()})
+	return body
 }
