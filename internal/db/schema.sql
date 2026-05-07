@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict nnz79svnZW7d5Ny3h00BL9v3wyy4SgTycZT97sxvKucieEIaJldfe3qne2Y1JH1
+\restrict fOOfuJeyMBXvFuDKNoyRdCStN3BfZpT3s7rJWFtEZTjVqwDgvLgXnjc8CXVumsM
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -331,13 +331,13 @@ CREATE TABLE public.users (
     email public.citext NOT NULL,
     email_verified_at timestamp(3) with time zone,
     password_hash text,
-    username public.citext NOT NULL,
     display_name text,
     role public."UserRole" DEFAULT 'USER'::public."UserRole" NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
     last_login_at timestamp(3) with time zone,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) with time zone NOT NULL
+    updated_at timestamp(3) with time zone NOT NULL,
+    username public.citext NOT NULL
 );
 
 
@@ -646,5 +646,5 @@ ALTER TABLE ONLY public.user_identities
 -- PostgreSQL database dump complete
 --
 
-\unrestrict nnz79svnZW7d5Ny3h00BL9v3wyy4SgTycZT97sxvKucieEIaJldfe3qne2Y1JH1
+\unrestrict fOOfuJeyMBXvFuDKNoyRdCStN3BfZpT3s7rJWFtEZTjVqwDgvLgXnjc8CXVumsM
 

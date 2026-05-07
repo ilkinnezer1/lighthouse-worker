@@ -461,13 +461,13 @@ type User struct {
 	Email           interface{}
 	EmailVerifiedAt pgtype.Timestamptz
 	PasswordHash    *string
-	Username        interface{}
 	DisplayName     *string
 	Role            UserRole
 	IsActive        bool
 	LastLoginAt     pgtype.Timestamptz
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+	Username        interface{}
 }
 
 type UserIdentity struct {
