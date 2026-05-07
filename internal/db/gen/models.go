@@ -461,6 +461,7 @@ type User struct {
 	Email           interface{}
 	EmailVerifiedAt pgtype.Timestamptz
 	PasswordHash    *string
+	Username        interface{}
 	DisplayName     *string
 	Role            UserRole
 	IsActive        bool

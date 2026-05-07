@@ -19,8 +19,8 @@ func emitDeploySucceeded(ctx context.Context, q *dbgen.Queries, dep *Deployment)
 	payload := map[string]any{
 		"deploymentId":  dep.ID,
 		"environmentId": dep.EnvironmentID,
-		"subdomain":     dep.Subdomain,
-		"url":           fmt.Sprintf("http://%s.localhost", dep.ID),
+		"host":          dep.Host,
+		"url":           dep.URL(),
 	}
 	return insertOutbox(ctx, q, eventDeploySucceeded, dep.TriggeredByUserID, payload)
 }

@@ -3,17 +3,22 @@ SELECT d.id,
        d.environment_id,
        d.triggered_by_user_id,
        d.status,
+       e.name              AS env_name,
        e.branch,
-       e.subdomain,
+       e.subdomain         AS env_subdomain,
+       e.custom_domain,
        e.env_vars_enc,
-       p.id AS project_id,
+       p.id                AS project_id,
+       p.subdomain         AS project_subdomain,
        p.repo_url,
        p.default_branch,
        p.build_config,
-       p.owner_id
+       p.owner_id,
+       u.username::text    AS owner_username
 FROM deployments d
          JOIN environments e ON e.id = d.environment_id
          JOIN projects p ON p.id = e.project_id
+         JOIN users u ON u.id = p.owner_id
 WHERE d.id = $1;
 
 -- name: StartDeployment :exec

@@ -21,6 +21,7 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/queue"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/redisx"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
 )
 
@@ -71,13 +72,14 @@ func main() {
 
 	q := dbgen.New(pool)
 	logs := logstream.New(rdb)
+	mode := routing.Mode(cfg.Mode)
 	stageList := []pipeline.Stage{
 		stages.NewClone(logs),
 		stages.NewBuild(logs),
-		stages.NewRun(docker, logs, q),
+		stages.NewRun(docker, logs, q, mode),
 	}
 	pipe := pipeline.NewPipeline(q, root, stageList)
-	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir)
+	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
 	srv := httpx.New(cfg.HTTPAddr, root)
 	consumer := queue.New(rdb, root, runner.Run)

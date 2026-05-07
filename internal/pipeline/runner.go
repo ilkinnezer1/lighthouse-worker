@@ -10,6 +10,7 @@ import (
 
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
 )
 
 type Runner struct {
@@ -17,14 +18,18 @@ type Runner struct {
 	pipeline    *Pipeline
 	log         *slog.Logger
 	workDirBase string
+	mode        routing.Mode
+	baseDomain  string
 }
 
-func NewRunner(q *dbgen.Queries, p *Pipeline, log *slog.Logger, workDirBase string) *Runner {
+func NewRunner(q *dbgen.Queries, p *Pipeline, log *slog.Logger, workDirBase string, mode routing.Mode, baseDomain string) *Runner {
 	return &Runner{
 		q:           q,
 		pipeline:    p,
 		log:         logger.Ctx(log, "Pipeline"),
 		workDirBase: workDirBase,
+		mode:        mode,
+		baseDomain:  baseDomain,
 	}
 }
 
@@ -42,13 +47,13 @@ func (r *Runner) Run(ctx context.Context, deploymentID string) error {
 		return nil
 	}
 
-	dep := buildDeployment(row, deploymentID, r.workDirBase)
+	dep := buildDeployment(row, deploymentID, r.workDirBase, r.mode, r.baseDomain)
 
 	r.log.Info("running deployment",
 		slog.String("deploymentId", deploymentID),
 		slog.String("repo", dep.RepoURL),
 		slog.String("branch", dep.Branch),
-		slog.String("subdomain", dep.Subdomain),
+		slog.String("env", dep.EnvName),
 	)
 
 	return r.pipeline.Execute(ctx, dep)
@@ -66,7 +71,23 @@ func (r *Runner) lookup(ctx context.Context, deploymentID string) (dbgen.GetDepl
 	return row, nil
 }
 
-func buildDeployment(row dbgen.GetDeploymentForJobRow, deploymentID, workDirBase string) *Deployment {
+func buildDeployment(row dbgen.GetDeploymentForJobRow, deploymentID, workDirBase string, mode routing.Mode, baseDomain string) *Deployment {
+	custom := ""
+	if row.CustomDomain != nil {
+		custom = *row.CustomDomain
+	}
+	host := routing.Host(routing.HostParts{
+		Mode:             mode,
+		BaseDomain:       baseDomain,
+		Username:         row.OwnerUsername,
+		ProjectSubdomain: row.ProjectSubdomain,
+		EnvSubdomain:     row.EnvSubdomain,
+		CustomDomain:     custom,
+	})
+	scheme := "http"
+	if mode.IsServer() {
+		scheme = "https"
+	}
 	return &Deployment{
 		ID:                deploymentID,
 		EnvironmentID:     uuidString(row.EnvironmentID),
@@ -75,9 +96,15 @@ func buildDeployment(row dbgen.GetDeploymentForJobRow, deploymentID, workDirBase
 		TriggeredByUserID: uuidString(row.TriggeredByUserID),
 		RepoURL:           row.RepoUrl,
 		Branch:            branchOrDefault(row),
-		Subdomain:         row.Subdomain,
+		EnvName:           row.EnvName,
+		EnvSubdomain:      row.EnvSubdomain,
+		ProjectSubdomain:  row.ProjectSubdomain,
+		OwnerUsername:     row.OwnerUsername,
+		CustomDomain:      custom,
 		BuildConfig:       row.BuildConfig,
 		WorkDir:           filepath.Join(workDirBase, deploymentID),
+		Host:              host,
+		Scheme:            scheme,
 	}
 }
 

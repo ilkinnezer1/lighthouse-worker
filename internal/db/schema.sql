@@ -331,6 +331,7 @@ CREATE TABLE public.users (
     email public.citext NOT NULL,
     email_verified_at timestamp(3) with time zone,
     password_hash text,
+    username public.citext NOT NULL,
     display_name text,
     role public."UserRole" DEFAULT 'USER'::public."UserRole" NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
@@ -552,6 +553,13 @@ CREATE INDEX user_identities_user_id_idx ON public.user_identities USING btree (
 --
 
 CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email);
+
+
+--
+-- Name: users_username_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX users_username_key ON public.users USING btree (username);
 
 
 --

@@ -15,21 +15,25 @@ import (
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
 )
 
 const (
 	publicNetwork = "lighthouse-public"
 	defaultPort   = 80
+	// Cert resolver name must match the Traefik server config.
+	certResolver = "le"
 )
 
 type Run struct {
 	docker *client.Client
 	logs   *logstream.Writer
 	q      *dbgen.Queries
+	mode   routing.Mode
 }
 
-func NewRun(docker *client.Client, logs *logstream.Writer, q *dbgen.Queries) *Run {
-	return &Run{docker: docker, logs: logs, q: q}
+func NewRun(docker *client.Client, logs *logstream.Writer, q *dbgen.Queries, mode routing.Mode) *Run {
+	return &Run{docker: docker, logs: logs, q: q, mode: mode}
 }
 
 func (*Run) Name() string { return "run" }
@@ -62,7 +66,7 @@ func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment) (str
 	name := containerName(dep.ID)
 	cfg := &container.Config{
 		Image:  ImageTag(dep.ID),
-		Labels: traefikLabels(dep),
+		Labels: traefikLabels(dep, r.mode),
 	}
 	hostCfg := &container.HostConfig{
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
@@ -109,14 +113,24 @@ func (r *Run) logLine(ctx context.Context, deploymentID, line string) {
 	_ = r.logs.WriteLine(ctx, deploymentID, "run", line)
 }
 
-func traefikLabels(dep *pipeline.Deployment) map[string]string {
+func traefikLabels(dep *pipeline.Deployment, mode routing.Mode) map[string]string {
 	router := "deploy-" + dep.ID
-	host := dep.ID + ".localhost"
-	return map[string]string{
-		"traefik.enable": "true",
-		fmt.Sprintf("traefik.http.routers.%s.rule", router):                          fmt.Sprintf("Host(`%s`)", host),
-		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", router):     fmt.Sprintf("%d", defaultPort),
+	rule := fmt.Sprintf("Host(`%s`)", dep.Host)
+	entrypoint := "web"
+	if mode.IsServer() {
+		entrypoint = "websecure"
 	}
+	labels := map[string]string{
+		"traefik.enable": "true",
+		fmt.Sprintf("traefik.http.routers.%s.rule", router):                      rule,
+		fmt.Sprintf("traefik.http.routers.%s.entrypoints", router):               entrypoint,
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", router): fmt.Sprintf("%d", defaultPort),
+	}
+	if mode.IsServer() {
+		labels[fmt.Sprintf("traefik.http.routers.%s.tls", router)] = "true"
+		labels[fmt.Sprintf("traefik.http.routers.%s.tls.certresolver", router)] = certResolver
+	}
+	return labels
 }
 
 func containerName(deploymentID string) string {

@@ -35,17 +35,22 @@ SELECT d.id,
        d.environment_id,
        d.triggered_by_user_id,
        d.status,
+       e.name              AS env_name,
        e.branch,
-       e.subdomain,
+       e.subdomain         AS env_subdomain,
+       e.custom_domain,
        e.env_vars_enc,
-       p.id AS project_id,
+       p.id                AS project_id,
+       p.subdomain         AS project_subdomain,
        p.repo_url,
        p.default_branch,
        p.build_config,
-       p.owner_id
+       p.owner_id,
+       u.username::text    AS owner_username
 FROM deployments d
          JOIN environments e ON e.id = d.environment_id
          JOIN projects p ON p.id = e.project_id
+         JOIN users u ON u.id = p.owner_id
 WHERE d.id = $1
 `
 
@@ -54,14 +59,18 @@ type GetDeploymentForJobRow struct {
 	EnvironmentID     pgtype.UUID
 	TriggeredByUserID pgtype.UUID
 	Status            DeploymentStatus
+	EnvName           string
 	Branch            *string
-	Subdomain         string
+	EnvSubdomain      string
+	CustomDomain      *string
 	EnvVarsEnc        *string
 	ProjectID         pgtype.UUID
+	ProjectSubdomain  string
 	RepoUrl           string
 	DefaultBranch     string
 	BuildConfig       []byte
 	OwnerID           pgtype.UUID
+	OwnerUsername     string
 }
 
 func (q *Queries) GetDeploymentForJob(ctx context.Context, id pgtype.UUID) (GetDeploymentForJobRow, error) {
@@ -72,14 +81,18 @@ func (q *Queries) GetDeploymentForJob(ctx context.Context, id pgtype.UUID) (GetD
 		&i.EnvironmentID,
 		&i.TriggeredByUserID,
 		&i.Status,
+		&i.EnvName,
 		&i.Branch,
-		&i.Subdomain,
+		&i.EnvSubdomain,
+		&i.CustomDomain,
 		&i.EnvVarsEnc,
 		&i.ProjectID,
+		&i.ProjectSubdomain,
 		&i.RepoUrl,
 		&i.DefaultBranch,
 		&i.BuildConfig,
 		&i.OwnerID,
+		&i.OwnerUsername,
 	)
 	return i, err
 }
