@@ -26,7 +26,7 @@ func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage) *Pipeline {
 	}
 }
 
-// Execute Status writes happen before the work, so a crash mid-stage leaves the row
+// Status writes happen before the work so a crash mid-stage leaves the row
 // in the correct in-flight state for the reaper.
 func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
