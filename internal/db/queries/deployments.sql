@@ -43,3 +43,27 @@ WHERE id = $1;
 UPDATE deployments
 SET last_heartbeat_at = now()
 WHERE id = $1;
+
+-- name: GetEnvironmentForTeardown :one
+SELECT e.id,
+       e.name           AS env_name,
+       e.subdomain      AS env_subdomain,
+       e.active,
+       p.id             AS project_id,
+       p.owner_id,
+       u.username::text AS owner_username
+FROM environments e
+         JOIN projects p ON p.id = e.project_id
+         JOIN users u ON u.id = p.owner_id
+WHERE e.id = $1;
+
+-- name: ListDeploymentIDsByEnvironment :many
+SELECT id, status
+FROM deployments
+WHERE environment_id = $1;
+
+-- name: DeactivateEnvironment :exec
+UPDATE environments
+SET active     = false,
+    updated_at = now()
+WHERE id = $1;

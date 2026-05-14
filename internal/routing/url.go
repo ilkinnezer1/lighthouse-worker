@@ -21,8 +21,6 @@ type HostParts struct {
 	CustomDomain     string
 }
 
-// Host returns the bare hostname (no scheme) Traefik should match on.
-// Custom domain wins outright when set.
 func Host(p HostParts) string {
 	if d := strings.TrimSpace(p.CustomDomain); d != "" {
 		return d
@@ -30,5 +28,4 @@ func Host(p HostParts) string {
 	return p.EnvSubdomain + "." + p.ProjectSubdomain + "." + p.Username + "." + p.BaseDomain
 }
 
-// IsServer reports whether TLS labels should be attached.
 func (m Mode) IsServer() bool { return m == ModeServer }

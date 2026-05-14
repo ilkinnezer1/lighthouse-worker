@@ -10,8 +10,6 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 )
 
-// runCmd runs cmd, streaming stdout+stderr line-by-line to logs as
-// (deploymentID, stage, line). Process is killed if ctx is cancelled.
 func runCmd(ctx context.Context, cmd *exec.Cmd, logs *logstream.Writer, deploymentID, stage string) error {
 	pipe, err := combinedPipe(cmd)
 	if err != nil {
@@ -24,8 +22,7 @@ func runCmd(ctx context.Context, cmd *exec.Cmd, logs *logstream.Writer, deployme
 	return cmd.Wait()
 }
 
-// combinedPipe ties stderr to stdout so a single Scanner sees both
-// in chronological order — git/docker write progress to stderr.
+// git/docker write progress to stderr; merging keeps lines in order.
 func combinedPipe(cmd *exec.Cmd) (io.Reader, error) {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

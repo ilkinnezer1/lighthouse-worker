@@ -161,7 +161,6 @@ func ParseLevel(s string) slog.Level {
 	}
 }
 
-// Ctx returns a logger pre-tagged with a Nest-style [Context] label.
 func Ctx(l *slog.Logger, name string) *slog.Logger {
 	return l.With(slog.String("context", name))
 }

@@ -14,48 +14,50 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
-const (
-	streamName        = "jobs:build"
-	groupName         = "worker"
-	fieldDeploymentID = "deploymentId"
-)
+// Returning nil triggers XACK; a non-nil error leaves the message in PEL.
+type Handler func(ctx context.Context, payloadID string) error
 
-// Handler is invoked for each delivered job. Returning nil triggers XACK.
-type Handler func(ctx context.Context, deploymentID string) error
+type Config struct {
+	Stream   string
+	Group    string
+	IDField  string
+	LogLabel string
+}
 
 type Consumer struct {
 	rdb      *redis.Client
 	log      *slog.Logger
-	stream   string // "jobs:build"
-	group    string // "worker"
+	cfg      Config
 	consumer string // "<hostname>-<pid>"
 	handler  Handler
 }
 
-func New(rdb *redis.Client, log *slog.Logger, handler Handler) *Consumer {
+func New(rdb *redis.Client, log *slog.Logger, cfg Config, handler Handler) *Consumer {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		host = "worker"
 	}
+	label := cfg.LogLabel
+	if label == "" {
+		label = "Queue"
+	}
 	return &Consumer{
 		rdb:      rdb,
-		log:      logger.Ctx(log, "Queue"),
-		stream:   streamName,
-		group:    groupName,
+		log:      logger.Ctx(log, label),
+		cfg:      cfg,
 		consumer: fmt.Sprintf("%s-%d", host, os.Getpid()),
 		handler:  handler,
 	}
 }
 
-// Run creates the consumer group on first boot (idempotent), then loops on
 func (c *Consumer) Run(ctx context.Context) error {
 	if err := c.ensureGroup(ctx); err != nil {
 		return err
 	}
 
 	c.log.Info("consuming",
-		slog.String("stream", c.stream),
-		slog.String("group", c.group),
+		slog.String("stream", c.cfg.Stream),
+		slog.String("group", c.cfg.Group),
 		slog.String("consumer", c.consumer),
 	)
 
@@ -66,9 +68,9 @@ func (c *Consumer) Run(ctx context.Context) error {
 		}
 
 		streams, err := c.rdb.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    c.group,
+			Group:    c.cfg.Group,
 			Consumer: c.consumer,
-			Streams:  []string{c.stream, ">"},
+			Streams:  []string{c.cfg.Stream, ">"},
 			Count:    1,
 			Block:    5 * time.Second,
 		}).Result()
@@ -99,9 +101,9 @@ func (c *Consumer) Run(ctx context.Context) error {
 }
 
 func (c *Consumer) ensureGroup(ctx context.Context) error {
-	err := c.rdb.XGroupCreateMkStream(ctx, c.stream, c.group, "$").Err()
+	err := c.rdb.XGroupCreateMkStream(ctx, c.cfg.Stream, c.cfg.Group, "$").Err()
 	if err == nil {
-		c.log.Info("group created", slog.String("group", c.group))
+		c.log.Info("group created", slog.String("group", c.cfg.Group))
 		return nil
 	}
 	// BUSYGROUP = group already exists from a previous boot. Expected, ignore.
@@ -112,14 +114,15 @@ func (c *Consumer) ensureGroup(ctx context.Context) error {
 }
 
 func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
-	deploymentID, ok := msg.Values[fieldDeploymentID].(string)
-	if !ok || deploymentID == "" {
+	payloadID, ok := msg.Values[c.cfg.IDField].(string)
+	if !ok || payloadID == "" {
 		c.log.Error("malformed job, acking and skipping",
 			slog.String("messageId", msg.ID),
+			slog.String("field", c.cfg.IDField),
 			slog.Any("values", msg.Values),
 		)
 		// Re-delivering a malformed job won't help. Ack so it doesn't sit in PEL forever.
-		if err := c.rdb.XAck(ctx, c.stream, c.group, msg.ID).Err(); err != nil {
+		if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msg.ID).Err(); err != nil {
 			c.log.Error("ack malformed job failed",
 				slog.String("messageId", msg.ID),
 				slog.Any("err", err),
@@ -128,16 +131,16 @@ func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
 		return
 	}
 
-	if err := c.handler(ctx, deploymentID); err != nil {
+	if err := c.handler(ctx, payloadID); err != nil {
 		c.log.Error("handler failed — leaving in PEL",
-			slog.String("deploymentId", deploymentID),
+			slog.String(c.cfg.IDField, payloadID),
 			slog.String("messageId", msg.ID),
 			slog.Any("err", err),
 		)
 		return
 	}
 
-	if err := c.rdb.XAck(ctx, c.stream, c.group, msg.ID).Err(); err != nil {
+	if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msg.ID).Err(); err != nil {
 		c.log.Error("ack failed", slog.String("messageId", msg.ID), slog.Any("err", err))
 	}
 }

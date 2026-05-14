@@ -11,6 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deactivateEnvironment = `-- name: DeactivateEnvironment :exec
+UPDATE environments
+SET active     = false,
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) DeactivateEnvironment(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deactivateEnvironment, id)
+	return err
+}
+
 const finishDeployment = `-- name: FinishDeployment :exec
 UPDATE deployments
 SET status        = $2,
@@ -95,6 +107,76 @@ func (q *Queries) GetDeploymentForJob(ctx context.Context, id pgtype.UUID) (GetD
 		&i.OwnerUsername,
 	)
 	return i, err
+}
+
+const getEnvironmentForTeardown = `-- name: GetEnvironmentForTeardown :one
+SELECT e.id,
+       e.name           AS env_name,
+       e.subdomain      AS env_subdomain,
+       e.active,
+       p.id             AS project_id,
+       p.owner_id,
+       u.username::text AS owner_username
+FROM environments e
+         JOIN projects p ON p.id = e.project_id
+         JOIN users u ON u.id = p.owner_id
+WHERE e.id = $1
+`
+
+type GetEnvironmentForTeardownRow struct {
+	ID            pgtype.UUID
+	EnvName       string
+	EnvSubdomain  string
+	Active        bool
+	ProjectID     pgtype.UUID
+	OwnerID       pgtype.UUID
+	OwnerUsername string
+}
+
+func (q *Queries) GetEnvironmentForTeardown(ctx context.Context, id pgtype.UUID) (GetEnvironmentForTeardownRow, error) {
+	row := q.db.QueryRow(ctx, getEnvironmentForTeardown, id)
+	var i GetEnvironmentForTeardownRow
+	err := row.Scan(
+		&i.ID,
+		&i.EnvName,
+		&i.EnvSubdomain,
+		&i.Active,
+		&i.ProjectID,
+		&i.OwnerID,
+		&i.OwnerUsername,
+	)
+	return i, err
+}
+
+const listDeploymentIDsByEnvironment = `-- name: ListDeploymentIDsByEnvironment :many
+SELECT id, status
+FROM deployments
+WHERE environment_id = $1
+`
+
+type ListDeploymentIDsByEnvironmentRow struct {
+	ID     pgtype.UUID
+	Status DeploymentStatus
+}
+
+func (q *Queries) ListDeploymentIDsByEnvironment(ctx context.Context, environmentID pgtype.UUID) ([]ListDeploymentIDsByEnvironmentRow, error) {
+	rows, err := q.db.Query(ctx, listDeploymentIDsByEnvironment, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDeploymentIDsByEnvironmentRow
+	for rows.Next() {
+		var i ListDeploymentIDsByEnvironmentRow
+		if err := rows.Scan(&i.ID, &i.Status); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const startDeployment = `-- name: StartDeployment :exec

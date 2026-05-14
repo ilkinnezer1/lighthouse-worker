@@ -40,3 +40,60 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) er
 	)
 	return err
 }
+
+const listServicesByEnvironment = `-- name: ListServicesByEnvironment :many
+SELECT s.id,
+       s.deployment_id,
+       s.name,
+       s.image,
+       s.container_id,
+       s.host,
+       s.port,
+       s.is_web,
+       s.status
+FROM services s
+         JOIN deployments d ON d.id = s.deployment_id
+WHERE d.environment_id = $1
+`
+
+func (q *Queries) ListServicesByEnvironment(ctx context.Context, environmentID pgtype.UUID) ([]Service, error) {
+	rows, err := q.db.Query(ctx, listServicesByEnvironment, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Service
+	for rows.Next() {
+		var i Service
+		if err := rows.Scan(
+			&i.ID,
+			&i.DeploymentID,
+			&i.Name,
+			&i.Image,
+			&i.ContainerID,
+			&i.Host,
+			&i.Port,
+			&i.IsWeb,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markServiceTornDown = `-- name: MarkServiceTornDown :exec
+UPDATE services
+SET status       = 'torn_down',
+    container_id = NULL
+WHERE id = $1
+`
+
+func (q *Queries) MarkServiceTornDown(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markServiceTornDown, id)
+	return err
+}

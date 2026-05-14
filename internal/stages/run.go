@@ -21,7 +21,7 @@ import (
 const (
 	publicNetwork = "lighthouse-public"
 	defaultPort   = 80
-	// Cert resolver name must match the Traefik server config.
+	// Must match certificatesresolvers.le.* in docker-compose.dev.yml.
 	certResolver = "le"
 )
 
@@ -137,8 +137,6 @@ func containerName(deploymentID string) string {
 	return "deploy-" + deploymentID
 }
 
-// isAlreadyExists matches the Docker SDK's "already exists" responses for
-// both NetworkCreate and ContainerCreate.
 func isAlreadyExists(err error) bool {
 	if err == nil {
 		return false

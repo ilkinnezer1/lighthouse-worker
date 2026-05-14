@@ -23,6 +23,7 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/redisx"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/teardown"
 )
 
 func main() {
@@ -82,13 +83,28 @@ func main() {
 	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
 	srv := httpx.New(cfg.HTTPAddr, root)
-	consumer := queue.New(rdb, root, runner.Run)
+
+	buildConsumer := queue.New(rdb, root, queue.Config{
+		Stream:   "jobs:build",
+		Group:    "worker",
+		IDField:  "deploymentId",
+		LogLabel: "Queue.build",
+	}, runner.Run)
+
+	teardownRunner := teardown.New(docker, q, root, cfg.WorkDir)
+	teardownConsumer := queue.New(rdb, root, queue.Config{
+		Stream:   "jobs:teardown",
+		Group:    "worker",
+		IDField:  "environmentId",
+		LogLabel: "Queue.teardown",
+	}, teardownRunner.Run)
 
 	boot.Info("ready")
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error { return srv.Run(gCtx) })
-	g.Go(func() error { return consumer.Run(gCtx) })
+	g.Go(func() error { return buildConsumer.Run(gCtx) })
+	g.Go(func() error { return teardownConsumer.Run(gCtx) })
 
 	if err := g.Wait(); err != nil {
 		boot.Error("stopped with error", slog.Any("err", err))
