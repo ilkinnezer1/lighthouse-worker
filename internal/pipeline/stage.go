@@ -25,7 +25,7 @@ type Deployment struct {
 
 func (d *Deployment) URL() string { return d.Scheme + "://" + d.Host }
 
-// Run must be idempotent: a redelivered job after a worker crash will call it
+// Stage Run must be idempotent: a redelivered job after a worker crash will call it
 // again on a stage that may already have done partial work.
 type Stage interface {
 	Name() string

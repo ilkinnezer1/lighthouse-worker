@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
@@ -26,14 +25,14 @@ func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage) *Pipeline {
 	}
 }
 
-// Status writes happen before the work so a crash mid-stage leaves the row
+// Execute Status writes happen before the work so a crash mid-stage leaves the row
 // in the correct in-flight state for the reaper.
 func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	hbCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
 	go runHeartbeat(hbCtx, p.q, dep.ID, p.log)
 
-	id := depUUID(dep.ID)
+	id := db.MustUUID(dep.ID)
 	if err := p.q.StartDeployment(ctx, id); err != nil {
 		return fmt.Errorf("mark started: %w", err)
 	}
@@ -41,7 +40,7 @@ func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	for _, stage := range p.stages {
 		if err := p.runStage(ctx, dep, stage); err != nil {
 			// markFailed error = infra problem worth retrying (caller leaves in PEL).
-			// Stage error with markFailed success = recorded; ACK and stop.
+			// Stage an error with the markFailed success = recorded; ACK and stop.
 			if markErr := p.markFailed(ctx, dep, stage.Name(), err); markErr != nil {
 				return markErr
 			}
@@ -63,7 +62,7 @@ func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 
 func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error {
 	name := s.Name()
-	id := depUUID(dep.ID)
+	id := db.MustUUID(dep.ID)
 	log := p.log.With(slog.String("stage", name), slog.String("deploymentId", dep.ID))
 
 	if next, ok := deploymentStatusFor(name); ok {
@@ -108,7 +107,7 @@ func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error
 func (p *Pipeline) markFailed(ctx context.Context, dep *Deployment, stageName string, runErr error) error {
 	summary := fmt.Sprintf("%s: %s", stageName, runErr.Error())
 	err := p.q.FinishDeployment(ctx, dbgen.FinishDeploymentParams{
-		ID:           depUUID(dep.ID),
+		ID:           db.MustUUID(dep.ID),
 		Status:       dbgen.DeploymentStatusFAILED,
 		ErrorSummary: &summary,
 	})
@@ -124,7 +123,7 @@ func (p *Pipeline) markFailed(ctx context.Context, dep *Deployment, stageName st
 
 func (p *Pipeline) markSucceeded(ctx context.Context, dep *Deployment) error {
 	err := p.q.FinishDeployment(ctx, dbgen.FinishDeploymentParams{
-		ID:     depUUID(dep.ID),
+		ID:     db.MustUUID(dep.ID),
 		Status: dbgen.DeploymentStatusSUCCEEDED,
 	})
 	if err != nil {
@@ -144,13 +143,6 @@ func deploymentStatusFor(stageName string) (dbgen.DeploymentStatus, bool) {
 		return dbgen.DeploymentStatusSTARTING, true
 	}
 	return "", false
-}
-
-// UUID was validated at queue intake; can't fail here.
-func depUUID(id string) pgtype.UUID {
-	var u pgtype.UUID
-	_ = u.Scan(id)
-	return u
 }
 
 func errorJSON(err error) []byte {

@@ -2,7 +2,6 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -10,8 +9,8 @@ import (
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
-	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
@@ -94,7 +93,7 @@ func (r *Run) recordService(ctx context.Context, dep *pipeline.Deployment, conta
 	status := "running"
 
 	err := r.q.InsertService(ctx, dbgen.InsertServiceParams{
-		DeploymentID: deploymentUUID(dep.ID),
+		DeploymentID: db.MustUUID(dep.ID),
 		Name:         "web",
 		Image:        &image,
 		ContainerID:  &containerID,
@@ -147,10 +146,3 @@ func isAlreadyExists(err error) bool {
 	return strings.Contains(err.Error(), "already exists")
 }
 
-func deploymentUUID(id string) pgtype.UUID {
-	var u pgtype.UUID
-	_ = u.Scan(id)
-	return u
-}
-
-var _ = errors.New

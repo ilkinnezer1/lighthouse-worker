@@ -15,8 +15,8 @@ import (
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
-	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
@@ -40,7 +40,7 @@ func New(docker *client.Client, q *dbgen.Queries, log *slog.Logger, workDirBase 
 }
 
 func (r *Runner) Run(ctx context.Context, environmentID string) error {
-	envUUID, err := parseUUID(environmentID)
+	envUUID, err := db.ParseUUID(environmentID)
 	if err != nil {
 		return err
 	}
@@ -67,9 +67,9 @@ func (r *Runner) Run(ctx context.Context, environmentID string) error {
 	// Phase 5 cancellation pubsub is the proper place to interrupt in-flight builds.
 	// For now we just flag them; the still-running build may produce orphaned artifacts.
 	for _, d := range deployments {
-		if !isTerminal(d.Status) {
+		if !db.IsDeploymentTerminal(d.Status) {
 			log.Warn("deployment still in flight at teardown",
-				slog.String("deploymentId", uuidString(d.ID)),
+				slog.String("deploymentId", db.UUIDString(d.ID)),
 				slog.String("status", string(d.Status)),
 			)
 		}
@@ -85,14 +85,14 @@ func (r *Runner) Run(ctx context.Context, environmentID string) error {
 		r.removeImage(ctx, log, s)
 		if err := r.q.MarkServiceTornDown(ctx, s.ID); err != nil {
 			log.Error("mark service torn_down failed",
-				slog.String("serviceId", uuidString(s.ID)),
+				slog.String("serviceId", db.UUIDString(s.ID)),
 				slog.Any("err", err),
 			)
 		}
 	}
 
 	for _, d := range deployments {
-		r.removeWorkDir(log, uuidString(d.ID))
+		r.removeWorkDir(log, db.UUIDString(d.ID))
 	}
 
 	if err := r.q.DeactivateEnvironment(ctx, envUUID); err != nil {
@@ -143,7 +143,7 @@ func (r *Runner) removeWorkDir(log *slog.Logger, deploymentID string) {
 func (r *Runner) emit(ctx context.Context, env dbgen.GetEnvironmentForTeardownRow, environmentID string) error {
 	payload := map[string]any{
 		"environmentId": environmentID,
-		"projectId":     uuidString(env.ProjectID),
+		"projectId":     db.UUIDString(env.ProjectID),
 		"name":          env.EnvName,
 		"subdomain":     env.EnvSubdomain,
 	}
@@ -156,29 +156,6 @@ func (r *Runner) emit(ctx context.Context, env dbgen.GetEnvironmentForTeardownRo
 		UserID:  env.OwnerID,
 		Payload: body,
 	})
-}
-
-func parseUUID(s string) (pgtype.UUID, error) {
-	var u pgtype.UUID
-	if err := u.Scan(s); err != nil {
-		return u, fmt.Errorf("parse uuid %q: %w", s, err)
-	}
-	return u, nil
-}
-
-func uuidString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	v, _ := u.Value()
-	s, _ := v.(string)
-	return s
-}
-
-func isTerminal(s dbgen.DeploymentStatus) bool {
-	return s == dbgen.DeploymentStatusSUCCEEDED ||
-		s == dbgen.DeploymentStatusFAILED ||
-		s == dbgen.DeploymentStatusCANCELLED
 }
 
 func isNotFound(err error) bool {

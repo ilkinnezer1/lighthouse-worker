@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 )
 
@@ -19,7 +20,7 @@ func runHeartbeat(ctx context.Context, q *dbgen.Queries, deploymentID string, lo
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := q.UpdateHeartbeat(ctx, depUUID(deploymentID)); err != nil {
+			if err := q.UpdateHeartbeat(ctx, db.MustUUID(deploymentID)); err != nil {
 				log.Warn("heartbeat failed", slog.Any("err", err))
 			}
 		}

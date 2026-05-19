@@ -6,8 +6,7 @@ import (
 	"log/slog"
 	"path/filepath"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
+	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
@@ -39,7 +38,7 @@ func (r *Runner) Run(ctx context.Context, deploymentID string) error {
 		return err
 	}
 
-	if isTerminal(row.Status) {
+	if db.IsDeploymentTerminal(row.Status) {
 		r.log.Info("already terminal — skipping",
 			slog.String("deploymentId", deploymentID),
 			slog.String("status", string(row.Status)),
@@ -60,11 +59,11 @@ func (r *Runner) Run(ctx context.Context, deploymentID string) error {
 }
 
 func (r *Runner) lookup(ctx context.Context, deploymentID string) (dbgen.GetDeploymentForJobRow, error) {
-	var depUUID pgtype.UUID
-	if err := depUUID.Scan(deploymentID); err != nil {
-		return dbgen.GetDeploymentForJobRow{}, fmt.Errorf("parse uuid %q: %w", deploymentID, err)
+	id, err := db.ParseUUID(deploymentID)
+	if err != nil {
+		return dbgen.GetDeploymentForJobRow{}, err
 	}
-	row, err := r.q.GetDeploymentForJob(ctx, depUUID)
+	row, err := r.q.GetDeploymentForJob(ctx, id)
 	if err != nil {
 		return dbgen.GetDeploymentForJobRow{}, fmt.Errorf("lookup deployment: %w", err)
 	}
@@ -90,10 +89,10 @@ func buildDeployment(row dbgen.GetDeploymentForJobRow, deploymentID, workDirBase
 	}
 	return &Deployment{
 		ID:                deploymentID,
-		EnvironmentID:     uuidString(row.EnvironmentID),
-		ProjectID:         uuidString(row.ProjectID),
-		OwnerID:           uuidString(row.OwnerID),
-		TriggeredByUserID: uuidString(row.TriggeredByUserID),
+		EnvironmentID:     db.UUIDString(row.EnvironmentID),
+		ProjectID:         db.UUIDString(row.ProjectID),
+		OwnerID:           db.UUIDString(row.OwnerID),
+		TriggeredByUserID: db.UUIDString(row.TriggeredByUserID),
 		RepoURL:           row.RepoUrl,
 		Branch:            branchOrDefault(row),
 		EnvName:           row.EnvName,
@@ -115,17 +114,3 @@ func branchOrDefault(row dbgen.GetDeploymentForJobRow) string {
 	return row.DefaultBranch
 }
 
-func isTerminal(s dbgen.DeploymentStatus) bool {
-	return s == dbgen.DeploymentStatusSUCCEEDED ||
-		s == dbgen.DeploymentStatusFAILED ||
-		s == dbgen.DeploymentStatusCANCELLED
-}
-
-func uuidString(u pgtype.UUID) string {
-	if !u.Valid {
-		return ""
-	}
-	v, _ := u.Value()
-	s, _ := v.(string)
-	return s
-}
