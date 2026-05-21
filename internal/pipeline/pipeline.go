@@ -6,31 +6,36 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/cancelbus"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
 type Pipeline struct {
-	q      *dbgen.Queries
-	log    *slog.Logger
-	stages []Stage
+	q         *dbgen.Queries
+	log       *slog.Logger
+	stages    []Stage
+	cancelBus *cancelbus.Listener
 }
 
-func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage) *Pipeline {
+func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage, cancelBus *cancelbus.Listener) *Pipeline {
 	return &Pipeline{
-		q:      q,
-		log:    logger.Ctx(log, "Pipeline"),
-		stages: stages,
+		q:         q,
+		log:       logger.Ctx(log, "Pipeline"),
+		stages:    stages,
+		cancelBus: cancelBus,
 	}
 }
 
 // Execute Status writes happen before the work so a crash mid-stage leaves the row
 // in the correct in-flight state for the reaper.
 func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
-	hbCtx, stopHeartbeat := context.WithCancel(ctx)
-	defer stopHeartbeat()
-	go runHeartbeat(hbCtx, p.q, dep.ID, p.log)
+	workCtx, cancelWork := context.WithCancel(ctx)
+	defer cancelWork()
+
+	go runHeartbeat(workCtx, p.q, dep.ID, p.log)
+	go p.cancelBus.Listen(workCtx, dep.ID, cancelWork)
 
 	id := db.MustUUID(dep.ID)
 	if err := p.q.StartDeployment(ctx, id); err != nil {
@@ -38,7 +43,7 @@ func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	}
 
 	for _, stage := range p.stages {
-		if err := p.runStage(ctx, dep, stage); err != nil {
+		if err := p.runStage(workCtx, dep, stage); err != nil {
 			// markFailed error = infra problem worth retrying (caller leaves in PEL).
 			// Stage an error with the markFailed success = recorded; ACK and stop.
 			if markErr := p.markFailed(ctx, dep, stage.Name(), err); markErr != nil {

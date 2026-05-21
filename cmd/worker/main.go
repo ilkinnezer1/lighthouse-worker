@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/docker/docker/client"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/cancelbus"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/config"
@@ -79,7 +80,8 @@ func main() {
 		stages.NewBuild(logs),
 		stages.NewRun(docker, logs, q, mode),
 	}
-	pipe := pipeline.NewPipeline(q, root, stageList)
+	cancelListener := cancelbus.New(rdb, root)
+	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
 	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
 	srv := httpx.New(cfg.HTTPAddr, root)
