@@ -31,6 +31,14 @@ func (b *Build) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	return nil
 }
 
+func (b *Build) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
+	cmd := exec.CommandContext(ctx, "docker", "image", "rm", "-f", ImageTag(dep.ID))
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker image rm: %w", err)
+	}
+	return nil
+}
+
 func ImageTag(deploymentID string) string {
 	return "deploy-" + deploymentID
 }

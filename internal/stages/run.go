@@ -37,6 +37,18 @@ func NewRun(docker *client.Client, logs *logstream.Writer, q *dbgen.Queries, mod
 
 func (*Run) Name() string { return "run" }
 
+func (r *Run) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
+	name := containerName(dep.ID)
+	err := r.docker.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
+	if err != nil && !errdefs.IsNotFound(err) {
+		return fmt.Errorf("container remove: %w", err)
+	}
+	if err := r.q.DeleteServicesByDeployment(ctx, db.MustUUID(dep.ID)); err != nil {
+		return fmt.Errorf("delete services: %w", err)
+	}
+	return nil
+}
+
 func (r *Run) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	if err := r.ensureNetwork(ctx); err != nil {
 		return err

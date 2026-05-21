@@ -13,6 +13,7 @@ import (
 const (
 	eventDeploySucceeded = "deploy.succeeded"
 	eventDeployFailed    = "deploy.failed"
+	eventDeployCancelled = "deploy.cancelled"
 )
 
 func emitDeploySucceeded(ctx context.Context, q *dbgen.Queries, dep *Deployment) error {
@@ -32,6 +33,14 @@ func emitDeployFailed(ctx context.Context, q *dbgen.Queries, dep *Deployment, st
 		"error":        runErr.Error(),
 	}
 	return insertOutbox(ctx, q, eventDeployFailed, dep.TriggeredByUserID, payload)
+}
+
+func emitDeployCancelled(ctx context.Context, q *dbgen.Queries, dep *Deployment, stageName string) error {
+	payload := map[string]any{
+		"deploymentId": dep.ID,
+		"stage":        stageName,
+	}
+	return insertOutbox(ctx, q, eventDeployCancelled, dep.TriggeredByUserID, payload)
 }
 
 func insertOutbox(ctx context.Context, q *dbgen.Queries, eventType, userID string, payload map[string]any) error {

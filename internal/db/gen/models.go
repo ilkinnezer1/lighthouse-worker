@@ -15,11 +15,12 @@ import (
 type DeploymentStageStatus string
 
 const (
-	DeploymentStageStatusPENDING   DeploymentStageStatus = "PENDING"
-	DeploymentStageStatusRUNNING   DeploymentStageStatus = "RUNNING"
-	DeploymentStageStatusSUCCEEDED DeploymentStageStatus = "SUCCEEDED"
-	DeploymentStageStatusFAILED    DeploymentStageStatus = "FAILED"
-	DeploymentStageStatusSKIPPED   DeploymentStageStatus = "SKIPPED"
+	DeploymentStageStatusPENDING    DeploymentStageStatus = "PENDING"
+	DeploymentStageStatusRUNNING    DeploymentStageStatus = "RUNNING"
+	DeploymentStageStatusSUCCEEDED  DeploymentStageStatus = "SUCCEEDED"
+	DeploymentStageStatusFAILED     DeploymentStageStatus = "FAILED"
+	DeploymentStageStatusSKIPPED    DeploymentStageStatus = "SKIPPED"
+	DeploymentStageStatusROLLEDBACK DeploymentStageStatus = "ROLLED_BACK"
 )
 
 func (e *DeploymentStageStatus) Scan(src interface{}) error {
@@ -63,7 +64,8 @@ func (e DeploymentStageStatus) Valid() bool {
 		DeploymentStageStatusRUNNING,
 		DeploymentStageStatusSUCCEEDED,
 		DeploymentStageStatusFAILED,
-		DeploymentStageStatusSKIPPED:
+		DeploymentStageStatusSKIPPED,
+		DeploymentStageStatusROLLEDBACK:
 		return true
 	}
 	return false
@@ -370,6 +372,7 @@ type Deployment struct {
 	StartedAt         pgtype.Timestamptz
 	FinishedAt        pgtype.Timestamptz
 	LastHeartbeatAt   pgtype.Timestamptz
+	CancelRequestedAt pgtype.Timestamptz
 	ErrorSummary      *string
 	CreatedAt         pgtype.Timestamptz
 }
@@ -383,6 +386,8 @@ type DeploymentStage struct {
 	StartedAt    pgtype.Timestamptz
 	FinishedAt   pgtype.Timestamptz
 	ErrorJson    []byte
+	Attempt      int32
+	MaxAttempts  int32
 }
 
 type Environment struct {

@@ -42,3 +42,10 @@ func (c *Clone) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	}
 	return nil
 }
+
+func (c *Clone) Rollback(_ context.Context, dep *pipeline.Deployment) error {
+	if err := os.RemoveAll(dep.WorkDir); err != nil {
+		return fmt.Errorf("remove workdir: %w", err)
+	}
+	return nil
+}
