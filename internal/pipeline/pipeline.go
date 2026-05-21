@@ -43,7 +43,7 @@ func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	}
 
 	for i, stage := range p.stages {
-		if err := p.runStage(workCtx, dep, stage); err != nil {
+		if err := p.runStage(ctx, workCtx, dep, stage); err != nil {
 			// parent ctx so cleanup survives a cancel of workCtx
 			p.rollbackPreceding(ctx, dep, i)
 			return p.finalizeFailure(ctx, dep, stage.Name(), err)
@@ -59,13 +59,13 @@ func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	return nil
 }
 
-func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error {
+func (p *Pipeline) runStage(parent, work context.Context, dep *Deployment, s Stage) error {
 	name := s.Name()
 	id := db.MustUUID(dep.ID)
 	log := p.log.With(slog.String("stage", name), slog.String("deploymentId", dep.ID))
 
 	if next, ok := deploymentStatusFor(name); ok {
-		err := p.q.TransitionDeploymentStatus(ctx, dbgen.TransitionDeploymentStatusParams{
+		err := p.q.TransitionDeploymentStatus(parent, dbgen.TransitionDeploymentStatusParams{
 			ID:     id,
 			Status: next,
 		})
@@ -75,15 +75,15 @@ func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error
 	}
 
 	for {
-		info, err := p.q.StartStage(ctx, dbgen.StartStageParams{DeploymentID: id, Name: name})
+		info, err := p.q.StartStage(parent, dbgen.StartStageParams{DeploymentID: id, Name: name})
 		if err != nil {
 			return fmt.Errorf("mark stage running: %w", err)
 		}
 
 		log.Info("stage started", slog.Int("attempt", int(info.Attempt)), slog.Int("max", int(info.MaxAttempts)))
-		runErr := s.Run(ctx, dep)
+		runErr := s.Run(work, dep)
 		if runErr == nil {
-			if err := p.q.FinishStage(ctx, dbgen.FinishStageParams{
+			if err := p.q.FinishStage(parent, dbgen.FinishStageParams{
 				DeploymentID: id,
 				Name:         name,
 				Status:       dbgen.DeploymentStageStatusSUCCEEDED,
@@ -94,20 +94,21 @@ func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error
 			return nil
 		}
 
-		if ctx.Err() != nil || info.Attempt >= info.MaxAttempts {
-			// best-effort write; if this also fails, the original error wins
-			_ = p.q.FinishStage(ctx, dbgen.FinishStageParams{
+		if work.Err() != nil || info.Attempt >= info.MaxAttempts {
+			if err := p.q.FinishStage(parent, dbgen.FinishStageParams{
 				DeploymentID: id,
 				Name:         name,
 				Status:       dbgen.DeploymentStageStatusFAILED,
 				ErrorJson:    errorJSON(runErr),
-			})
+			}); err != nil {
+				log.Warn("mark stage failed write", slog.Any("err", err))
+			}
 			log.Error("stage failed", slog.Any("err", runErr), slog.Int("attempt", int(info.Attempt)))
 			return runErr
 		}
 
 		log.Warn("stage failed, retrying", slog.Any("err", runErr), slog.Int("attempt", int(info.Attempt)))
-		if rbErr := s.Rollback(ctx, dep); rbErr != nil {
+		if rbErr := s.Rollback(parent, dep); rbErr != nil {
 			log.Warn("retry rollback failed", slog.Any("err", rbErr))
 		}
 	}
