@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
@@ -20,7 +21,7 @@ func NewBuild(logs *logstream.Writer) *Build {
 func (*Build) Name() string { return "build" }
 
 func (b *Build) Run(ctx context.Context, dep *pipeline.Deployment) error {
-	switch detectStrategy(dep.WorkDir) {
+	switch detectStrategy(dep.WorkDir, parseBuildOverrides(dep.BuildConfig).Strategy) {
 	case StrategyDockerfile:
 		return b.buildDockerfile(ctx, dep)
 	case StrategyCompose:
@@ -55,9 +56,28 @@ func (b *Build) buildDockerfile(ctx context.Context, dep *pipeline.Deployment) e
 }
 
 func (b *Build) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
+	if detectStrategy(dep.WorkDir, parseBuildOverrides(dep.BuildConfig).Strategy) == StrategyCompose {
+		return b.rollbackCompose(ctx, dep)
+	}
 	cmd := exec.CommandContext(ctx, "docker", "image", "rm", "-f", ImageTag(dep.ID))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker image rm: %w", err)
+	}
+	return nil
+}
+
+func (b *Build) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) error {
+	pattern := composeProject(dep.ID) + "-*"
+	out, err := exec.CommandContext(ctx, "docker", "images", "--filter", "reference="+pattern, "-q").Output()
+	if err != nil {
+		return fmt.Errorf("list compose images: %w", err)
+	}
+	ids := strings.Fields(string(out))
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := exec.CommandContext(ctx, "docker", append([]string{"rmi", "-f"}, ids...)...).Run(); err != nil {
+		return fmt.Errorf("rmi compose images: %w", err)
 	}
 	return nil
 }

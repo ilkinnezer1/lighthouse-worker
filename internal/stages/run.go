@@ -43,7 +43,7 @@ func NewRun(docker *client.Client, logs *logstream.Writer, q *dbgen.Queries, mod
 func (*Run) Name() string { return "run" }
 
 func (r *Run) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
-	if detectStrategy(dep.WorkDir) == StrategyCompose {
+	if detectStrategy(dep.WorkDir, parseBuildOverrides(dep.BuildConfig).Strategy) == StrategyCompose {
 		return r.rollbackCompose(ctx, dep)
 	}
 	name := containerName(dep.ID)
@@ -75,7 +75,7 @@ func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) err
 }
 
 func (r *Run) Run(ctx context.Context, dep *pipeline.Deployment) error {
-	switch detectStrategy(dep.WorkDir) {
+	switch detectStrategy(dep.WorkDir, parseBuildOverrides(dep.BuildConfig).Strategy) {
 	case StrategyDockerfile:
 		return r.runDockerfile(ctx, dep)
 	case StrategyCompose:
@@ -100,12 +100,19 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment) error
 }
 
 func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
-	project, err := compose.Parse(ctx, dep.WorkDir)
+	project, err := compose.Parse(ctx, dep.WorkDir, composeProject(dep.ID))
 	if err != nil {
 		return fmt.Errorf("parse compose: %w", err)
 	}
 
-	web := compose.WebService(project)
+	web := parseBuildOverrides(dep.BuildConfig).Web
+	if web != "" {
+		if _, ok := project.Services[web]; !ok {
+			return fmt.Errorf("buildConfig.web=%q but no such service in compose", web)
+		}
+	} else {
+		web = compose.WebService(project)
+	}
 	if web == "" {
 		return fmt.Errorf("compose project has no services")
 	}
@@ -121,13 +128,13 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
 		return err
 	}
 
-	modified := filepath.Join(dep.WorkDir, "lighthouse-compose.yml")
-	if err := compose.Write(project, modified); err != nil {
+	const modifiedName = "lighthouse-compose.yml"
+	if err := compose.Write(project, filepath.Join(dep.WorkDir, modifiedName)); err != nil {
 		return err
 	}
 
 	cmd := exec.CommandContext(ctx, "docker", "compose",
-		"-f", modified,
+		"-f", modifiedName,
 		"--project-name", composeProject(dep.ID),
 		"up", "-d", "--no-build",
 	)

@@ -14,8 +14,8 @@ import (
 var fileNames = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
 
 // Parse loads the first compose file found in workDir and returns the resolved
-// project. Errors if no compose file exists.
-func Parse(ctx context.Context, workDir string) (*types.Project, error) {
+// project using the given project name. Errors if no compose file exists.
+func Parse(ctx context.Context, workDir, projectName string) (*types.Project, error) {
 	file, err := findFile(workDir)
 	if err != nil {
 		return nil, err
@@ -29,7 +29,7 @@ func Parse(ctx context.Context, workDir string) (*types.Project, error) {
 		ConfigFiles: []types.ConfigFile{{Filename: file, Content: content}},
 		Environment: types.Mapping{},
 	}, func(o *loader.Options) {
-		o.SetProjectName("lighthouse", true)
+		o.SetProjectName(projectName, true)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load compose: %w", err)
