@@ -6,48 +6,47 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/cancelbus"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
 type Pipeline struct {
-	q      *dbgen.Queries
-	log    *slog.Logger
-	stages []Stage
+	q         *dbgen.Queries
+	log       *slog.Logger
+	stages    []Stage
+	cancelBus *cancelbus.Listener
 }
 
-func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage) *Pipeline {
+func NewPipeline(q *dbgen.Queries, log *slog.Logger, stages []Stage, cancelBus *cancelbus.Listener) *Pipeline {
 	return &Pipeline{
-		q:      q,
-		log:    logger.Ctx(log, "Pipeline"),
-		stages: stages,
+		q:         q,
+		log:       logger.Ctx(log, "Pipeline"),
+		stages:    stages,
+		cancelBus: cancelBus,
 	}
 }
 
 // Execute Status writes happen before the work so a crash mid-stage leaves the row
 // in the correct in-flight state for the reaper.
 func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
-	hbCtx, stopHeartbeat := context.WithCancel(ctx)
-	defer stopHeartbeat()
-	go runHeartbeat(hbCtx, p.q, dep.ID, p.log)
+	workCtx, cancelWork := context.WithCancel(ctx)
+	defer cancelWork()
+
+	go runHeartbeat(workCtx, p.q, dep.ID, p.log)
+	go p.cancelBus.Listen(workCtx, dep.ID, cancelWork)
 
 	id := db.MustUUID(dep.ID)
 	if err := p.q.StartDeployment(ctx, id); err != nil {
 		return fmt.Errorf("mark started: %w", err)
 	}
 
-	for _, stage := range p.stages {
-		if err := p.runStage(ctx, dep, stage); err != nil {
-			// markFailed error = infra problem worth retrying (caller leaves in PEL).
-			// Stage an error with the markFailed success = recorded; ACK and stop.
-			if markErr := p.markFailed(ctx, dep, stage.Name(), err); markErr != nil {
-				return markErr
-			}
-			if outboxErr := emitDeployFailed(ctx, p.q, dep, stage.Name(), err); outboxErr != nil {
-				p.log.Warn("outbox failed event", slog.Any("err", outboxErr))
-			}
-			return nil
+	for i, stage := range p.stages {
+		if err := p.runStage(ctx, workCtx, dep, stage); err != nil {
+			// parent ctx so cleanup survives a cancel of workCtx
+			p.rollbackPreceding(ctx, dep, i)
+			return p.finalizeFailure(ctx, dep, stage.Name(), err)
 		}
 	}
 
@@ -60,13 +59,13 @@ func (p *Pipeline) Execute(ctx context.Context, dep *Deployment) error {
 	return nil
 }
 
-func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error {
+func (p *Pipeline) runStage(parent, work context.Context, dep *Deployment, s Stage) error {
 	name := s.Name()
 	id := db.MustUUID(dep.ID)
 	log := p.log.With(slog.String("stage", name), slog.String("deploymentId", dep.ID))
 
 	if next, ok := deploymentStatusFor(name); ok {
-		err := p.q.TransitionDeploymentStatus(ctx, dbgen.TransitionDeploymentStatusParams{
+		err := p.q.TransitionDeploymentStatus(parent, dbgen.TransitionDeploymentStatusParams{
 			ID:     id,
 			Status: next,
 		})
@@ -75,32 +74,106 @@ func (p *Pipeline) runStage(ctx context.Context, dep *Deployment, s Stage) error
 		}
 	}
 
-	if err := p.q.StartStage(ctx, dbgen.StartStageParams{DeploymentID: id, Name: name}); err != nil {
-		return fmt.Errorf("mark stage running: %w", err)
-	}
+	for {
+		info, err := p.q.StartStage(parent, dbgen.StartStageParams{DeploymentID: id, Name: name})
+		if err != nil {
+			return fmt.Errorf("mark stage running: %w", err)
+		}
 
-	log.Info("stage started")
-	if err := s.Run(ctx, dep); err != nil {
-		// best-effort write; if this also fails, the original error wins
-		_ = p.q.FinishStage(ctx, dbgen.FinishStageParams{
+		log.Info("stage started", slog.Int("attempt", int(info.Attempt)), slog.Int("max", int(info.MaxAttempts)))
+		runErr := s.Run(work, dep)
+		if runErr == nil {
+			if err := p.q.FinishStage(parent, dbgen.FinishStageParams{
+				DeploymentID: id,
+				Name:         name,
+				Status:       dbgen.DeploymentStageStatusSUCCEEDED,
+			}); err != nil {
+				return fmt.Errorf("mark stage succeeded: %w", err)
+			}
+			log.Info("stage completed")
+			return nil
+		}
+
+		if work.Err() != nil || info.Attempt >= info.MaxAttempts {
+			if err := p.q.FinishStage(parent, dbgen.FinishStageParams{
+				DeploymentID: id,
+				Name:         name,
+				Status:       dbgen.DeploymentStageStatusFAILED,
+				ErrorJson:    errorJSON(runErr),
+			}); err != nil {
+				log.Warn("mark stage failed write", slog.Any("err", err))
+			}
+			log.Error("stage failed", slog.Any("err", runErr), slog.Int("attempt", int(info.Attempt)))
+			return runErr
+		}
+
+		log.Warn("stage failed, retrying", slog.Any("err", runErr), slog.Int("attempt", int(info.Attempt)))
+		if rbErr := s.Rollback(parent, dep); rbErr != nil {
+			log.Warn("retry rollback failed", slog.Any("err", rbErr))
+		}
+	}
+}
+
+func (p *Pipeline) rollbackPreceding(ctx context.Context, dep *Deployment, failedIdx int) {
+	id := db.MustUUID(dep.ID)
+	for j := failedIdx - 1; j >= 0; j-- {
+		s := p.stages[j]
+		log := p.log.With(slog.String("stage", s.Name()), slog.String("deploymentId", dep.ID))
+		log.Info("rolling back stage")
+		if err := s.Rollback(ctx, dep); err != nil {
+			log.Warn("rollback failed (continuing)", slog.Any("err", err))
+		}
+		if err := p.q.FinishStage(ctx, dbgen.FinishStageParams{
 			DeploymentID: id,
-			Name:         name,
-			Status:       dbgen.DeploymentStageStatusFAILED,
-			ErrorJson:    errorJSON(err),
-		})
-		log.Error("stage failed", slog.Any("err", err))
+			Name:         s.Name(),
+			Status:       dbgen.DeploymentStageStatusROLLEDBACK,
+		}); err != nil {
+			log.Warn("mark rolled_back failed", slog.Any("err", err))
+		}
+	}
+}
+
+func (p *Pipeline) finalizeFailure(ctx context.Context, dep *Deployment, stageName string, runErr error) error {
+	cancelled, checkErr := p.wasCancelled(ctx, dep.ID)
+	if checkErr != nil {
+		p.log.Warn("cancel-state check failed (defaulting to FAILED)", slog.Any("err", checkErr))
+	}
+	if cancelled {
+		if err := p.markCancelled(ctx, dep); err != nil {
+			return err
+		}
+		if err := emitDeployCancelled(ctx, p.q, dep, stageName); err != nil {
+			p.log.Warn("outbox cancelled event", slog.Any("err", err))
+		}
+		return nil
+	}
+	if err := p.markFailed(ctx, dep, stageName, runErr); err != nil {
 		return err
 	}
+	if err := emitDeployFailed(ctx, p.q, dep, stageName, runErr); err != nil {
+		p.log.Warn("outbox failed event", slog.Any("err", err))
+	}
+	return nil
+}
 
-	err := p.q.FinishStage(ctx, dbgen.FinishStageParams{
-		DeploymentID: id,
-		Name:         name,
-		Status:       dbgen.DeploymentStageStatusSUCCEEDED,
+func (p *Pipeline) wasCancelled(ctx context.Context, deploymentID string) (bool, error) {
+	ts, err := p.q.GetCancelRequestedAt(ctx, db.MustUUID(deploymentID))
+	if err != nil {
+		return false, err
+	}
+	return ts.Valid, nil
+}
+
+func (p *Pipeline) markCancelled(ctx context.Context, dep *Deployment) error {
+	reason := "cancelled by user request"
+	err := p.q.FinishDeployment(ctx, dbgen.FinishDeploymentParams{
+		ID:           db.MustUUID(dep.ID),
+		Status:       dbgen.DeploymentStatusCANCELLED,
+		ErrorSummary: &reason,
 	})
 	if err != nil {
-		return fmt.Errorf("mark stage succeeded: %w", err)
+		return fmt.Errorf("mark deployment cancelled: %w", err)
 	}
-	log.Info("stage completed")
 	return nil
 }
 

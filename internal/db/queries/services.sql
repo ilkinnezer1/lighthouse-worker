@@ -21,3 +21,7 @@ UPDATE services
 SET status       = 'torn_down',
     container_id = NULL
 WHERE id = $1;
+
+-- name: DeleteServicesByDeployment :exec
+DELETE FROM services
+WHERE deployment_id = $1;

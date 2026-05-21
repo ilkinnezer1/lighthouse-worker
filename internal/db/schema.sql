@@ -41,7 +41,8 @@ CREATE TYPE public."DeploymentStageStatus" AS ENUM (
     'RUNNING',
     'SUCCEEDED',
     'FAILED',
-    'SKIPPED'
+    'SKIPPED',
+    'ROLLED_BACK'
 );
 
 
@@ -175,7 +176,9 @@ CREATE TABLE public.deployment_stages (
     ordinal integer NOT NULL,
     started_at timestamp(3) with time zone,
     finished_at timestamp(3) with time zone,
-    error_json jsonb
+    error_json jsonb,
+    attempt integer DEFAULT 0 NOT NULL,
+    max_attempts integer DEFAULT 1 NOT NULL
 );
 
 
@@ -194,6 +197,7 @@ CREATE TABLE public.deployments (
     started_at timestamp(3) with time zone,
     finished_at timestamp(3) with time zone,
     last_heartbeat_at timestamp(3) with time zone,
+    cancel_requested_at timestamp(3) with time zone,
     error_summary text,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

@@ -3,6 +3,7 @@ SELECT d.id,
        d.environment_id,
        d.triggered_by_user_id,
        d.status,
+       d.cancel_requested_at,
        e.name              AS env_name,
        e.branch,
        e.subdomain         AS env_subdomain,
@@ -20,6 +21,11 @@ FROM deployments d
          JOIN projects p ON p.id = e.project_id
          JOIN users u ON u.id = p.owner_id
 WHERE d.id = $1;
+
+-- name: GetCancelRequestedAt :one
+SELECT cancel_requested_at
+FROM deployments
+WHERE id = $1;
 
 -- name: StartDeployment :exec
 UPDATE deployments

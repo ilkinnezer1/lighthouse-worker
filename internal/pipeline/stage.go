@@ -25,9 +25,10 @@ type Deployment struct {
 
 func (d *Deployment) URL() string { return d.Scheme + "://" + d.Host }
 
-// Stage Run must be idempotent: a redelivered job after a worker crash will call it
-// again on a stage that may already have done partial work.
+// Run and Rollback must both be idempotent: redelivery, retry, and reverse-order
+// cleanup all call them on partial state.
 type Stage interface {
 	Name() string
 	Run(ctx context.Context, dep *Deployment) error
+	Rollback(ctx context.Context, dep *Deployment) error
 }

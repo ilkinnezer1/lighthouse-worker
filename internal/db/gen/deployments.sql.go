@@ -42,11 +42,25 @@ func (q *Queries) FinishDeployment(ctx context.Context, arg FinishDeploymentPara
 	return err
 }
 
+const getCancelRequestedAt = `-- name: GetCancelRequestedAt :one
+SELECT cancel_requested_at
+FROM deployments
+WHERE id = $1
+`
+
+func (q *Queries) GetCancelRequestedAt(ctx context.Context, id pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getCancelRequestedAt, id)
+	var cancel_requested_at pgtype.Timestamptz
+	err := row.Scan(&cancel_requested_at)
+	return cancel_requested_at, err
+}
+
 const getDeploymentForJob = `-- name: GetDeploymentForJob :one
 SELECT d.id,
        d.environment_id,
        d.triggered_by_user_id,
        d.status,
+       d.cancel_requested_at,
        e.name              AS env_name,
        e.branch,
        e.subdomain         AS env_subdomain,
@@ -71,6 +85,7 @@ type GetDeploymentForJobRow struct {
 	EnvironmentID     pgtype.UUID
 	TriggeredByUserID pgtype.UUID
 	Status            DeploymentStatus
+	CancelRequestedAt pgtype.Timestamptz
 	EnvName           string
 	Branch            *string
 	EnvSubdomain      string
@@ -93,6 +108,7 @@ func (q *Queries) GetDeploymentForJob(ctx context.Context, id pgtype.UUID) (GetD
 		&i.EnvironmentID,
 		&i.TriggeredByUserID,
 		&i.Status,
+		&i.CancelRequestedAt,
 		&i.EnvName,
 		&i.Branch,
 		&i.EnvSubdomain,

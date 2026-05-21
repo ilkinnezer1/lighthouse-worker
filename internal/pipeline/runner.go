@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -46,6 +47,10 @@ func (r *Runner) Run(ctx context.Context, deploymentID string) error {
 		return nil
 	}
 
+	if row.CancelRequestedAt.Valid {
+		return r.cancelAtPickup(ctx, row, deploymentID)
+	}
+
 	dep := buildDeployment(row, deploymentID, r.workDirBase, r.mode, r.baseDomain)
 
 	r.log.Info("running deployment",
@@ -56,6 +61,37 @@ func (r *Runner) Run(ctx context.Context, deploymentID string) error {
 	)
 
 	return r.pipeline.Execute(ctx, dep)
+}
+
+func (r *Runner) cancelAtPickup(ctx context.Context, row dbgen.GetDeploymentForJobRow, deploymentID string) error {
+	r.log.Info("cancel requested before pickup — short-circuiting",
+		slog.String("deploymentId", deploymentID),
+		slog.String("status", string(row.Status)),
+	)
+	reason := "cancelled by user request"
+	err := r.q.FinishDeployment(ctx, dbgen.FinishDeploymentParams{
+		ID:           row.ID,
+		Status:       dbgen.DeploymentStatusCANCELLED,
+		ErrorSummary: &reason,
+	})
+	if err != nil {
+		return fmt.Errorf("mark deployment cancelled: %w", err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"deploymentId": deploymentID,
+		"stage":        "pickup",
+	})
+	if err != nil {
+		return fmt.Errorf("marshal cancelled payload: %w", err)
+	}
+	if err := r.q.InsertOutboxEvent(ctx, dbgen.InsertOutboxEventParams{
+		Type:    eventDeployCancelled,
+		UserID:  row.TriggeredByUserID,
+		Payload: payload,
+	}); err != nil {
+		r.log.Warn("outbox cancelled event", slog.Any("err", err))
+	}
+	return nil
 }
 
 func (r *Runner) lookup(ctx context.Context, deploymentID string) (dbgen.GetDeploymentForJobRow, error) {

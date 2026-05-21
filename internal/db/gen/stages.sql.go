@@ -37,12 +37,14 @@ func (q *Queries) FinishStage(ctx context.Context, arg FinishStageParams) error 
 	return err
 }
 
-const startStage = `-- name: StartStage :exec
+const startStage = `-- name: StartStage :one
 UPDATE deployment_stages
 SET status     = 'RUNNING',
-    started_at = now()
+    started_at = now(),
+    attempt    = attempt + 1
 WHERE deployment_id = $1
   AND name = $2
+RETURNING attempt, max_attempts
 `
 
 type StartStageParams struct {
@@ -50,7 +52,14 @@ type StartStageParams struct {
 	Name         string
 }
 
-func (q *Queries) StartStage(ctx context.Context, arg StartStageParams) error {
-	_, err := q.db.Exec(ctx, startStage, arg.DeploymentID, arg.Name)
-	return err
+type StartStageRow struct {
+	Attempt     int32
+	MaxAttempts int32
+}
+
+func (q *Queries) StartStage(ctx context.Context, arg StartStageParams) (StartStageRow, error) {
+	row := q.db.QueryRow(ctx, startStage, arg.DeploymentID, arg.Name)
+	var i StartStageRow
+	err := row.Scan(&i.Attempt, &i.MaxAttempts)
+	return i, err
 }
