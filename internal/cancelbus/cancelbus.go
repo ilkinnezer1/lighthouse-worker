@@ -8,7 +8,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const channelPrefix = "cancel:deploy"
+const channelPrefix = "cancel:deploy:"
 
 type Listener struct {
 	rdb *redis.Client
@@ -33,9 +33,8 @@ func (l *Listener) Listen(ctx context.Context, deploymentID string, onCancel fun
 
 	// Receive blocks until the SUBSCRIBE ack lands, that prevents a race where a
 	// publication slips through before the channel is actually registered.
-
 	if _, err := sub.Receive(ctx); err != nil {
-		if ctx.Err() != nil {
+		if ctx.Err() == nil {
 			log.Warn("subscription failed", slog.Any("err", err))
 		}
 		return
