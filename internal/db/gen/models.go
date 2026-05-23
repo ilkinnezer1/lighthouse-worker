@@ -596,19 +596,22 @@ type GitCredential struct {
 }
 
 type ManagedDatabase struct {
-	ID            pgtype.UUID
-	EnvironmentID pgtype.UUID
-	Type          DatabaseType
-	Version       string
-	Name          string
-	Status        DatabaseStatus
-	Host          *string
-	Port          *int32
-	ConnSecretEnc *string
-	ErrorSummary  *string
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	OwnsContainer bool
+	ID                 pgtype.UUID
+	EnvironmentID      pgtype.UUID
+	Type               DatabaseType
+	Version            string
+	Name               string
+	Status             DatabaseStatus
+	Host               *string
+	Port               *int32
+	ConnSecretEnc      *string
+	ErrorSummary       *string
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+	OwnsContainer      bool
+	RunMigrate         bool
+	SeedFromDatabaseID pgtype.UUID
+	SeedFromSnapshotID pgtype.UUID
 }
 
 type PrismaMigration struct {

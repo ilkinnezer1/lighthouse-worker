@@ -13,22 +13,26 @@ import (
 
 const getDatabase = `-- name: GetDatabase :one
 SELECT id, environment_id, type, version, name, status, owns_container,
+       run_migrate, seed_from_database_id, seed_from_snapshot_id,
        host, port, conn_secret_enc
 FROM managed_databases
 WHERE id = $1
 `
 
 type GetDatabaseRow struct {
-	ID            pgtype.UUID
-	EnvironmentID pgtype.UUID
-	Type          DatabaseType
-	Version       string
-	Name          string
-	Status        DatabaseStatus
-	OwnsContainer bool
-	Host          *string
-	Port          *int32
-	ConnSecretEnc *string
+	ID                 pgtype.UUID
+	EnvironmentID      pgtype.UUID
+	Type               DatabaseType
+	Version            string
+	Name               string
+	Status             DatabaseStatus
+	OwnsContainer      bool
+	RunMigrate         bool
+	SeedFromDatabaseID pgtype.UUID
+	SeedFromSnapshotID pgtype.UUID
+	Host               *string
+	Port               *int32
+	ConnSecretEnc      *string
 }
 
 func (q *Queries) GetDatabase(ctx context.Context, id pgtype.UUID) (GetDatabaseRow, error) {
@@ -42,10 +46,47 @@ func (q *Queries) GetDatabase(ctx context.Context, id pgtype.UUID) (GetDatabaseR
 		&i.Name,
 		&i.Status,
 		&i.OwnsContainer,
+		&i.RunMigrate,
+		&i.SeedFromDatabaseID,
+		&i.SeedFromSnapshotID,
 		&i.Host,
 		&i.Port,
 		&i.ConnSecretEnc,
 	)
+	return i, err
+}
+
+const getLatestSuccessfulDeploymentForEnvironment = `-- name: GetLatestSuccessfulDeploymentForEnvironment :one
+SELECT id
+FROM deployments
+WHERE environment_id = $1 AND status = 'SUCCEEDED'
+ORDER BY finished_at DESC NULLS LAST
+LIMIT 1
+`
+
+func (q *Queries) GetLatestSuccessfulDeploymentForEnvironment(ctx context.Context, environmentID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestSuccessfulDeploymentForEnvironment, environmentID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const getProjectBuildConfigByEnvironment = `-- name: GetProjectBuildConfigByEnvironment :one
+SELECT p.build_config, p.id AS project_id
+FROM environments e
+JOIN projects p ON p.id = e.project_id
+WHERE e.id = $1
+`
+
+type GetProjectBuildConfigByEnvironmentRow struct {
+	BuildConfig []byte
+	ProjectID   pgtype.UUID
+}
+
+func (q *Queries) GetProjectBuildConfigByEnvironment(ctx context.Context, id pgtype.UUID) (GetProjectBuildConfigByEnvironmentRow, error) {
+	row := q.db.QueryRow(ctx, getProjectBuildConfigByEnvironment, id)
+	var i GetProjectBuildConfigByEnvironmentRow
+	err := row.Scan(&i.BuildConfig, &i.ProjectID)
 	return i, err
 }
 

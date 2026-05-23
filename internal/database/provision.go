@@ -68,6 +68,12 @@ func (r *Router) provision(ctx context.Context, databaseID string) error {
 		return fmt.Errorf("mark ready: %w", err)
 	}
 
+	if row.RunMigrate {
+		if err := r.runMigrate(ctx, row, connStr, log); err != nil {
+			log.Warn("runMigrate skipped/failed (continuing)", slog.Any("err", err))
+		}
+	}
+
 	if err := r.emit(ctx, eventProvisioned, databaseID, nil); err != nil {
 		log.Warn("outbox provisioned event failed", slog.Any("err", err))
 	}
@@ -108,6 +114,17 @@ func (r *Router) provisionPostgres(ctx context.Context, row dbgen.GetDatabaseRow
 	host = name
 	port = int32(postgresPort)
 	connStr = fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable", postgresUser, pass, host, port, row.Name)
+
+	if row.SeedFromSnapshotID.Valid {
+		if err := r.seedFromSnapshot(ctx, name, row.Name, row.SeedFromSnapshotID, log); err != nil {
+			return "", 0, "", fmt.Errorf("seed from snapshot: %w", err)
+		}
+	} else if row.SeedFromDatabaseID.Valid {
+		if err := r.seedFromDatabase(ctx, name, row.Name, row.SeedFromDatabaseID, log); err != nil {
+			return "", 0, "", fmt.Errorf("seed from database: %w", err)
+		}
+	}
+
 	return host, port, connStr, nil
 }
 

@@ -1,8 +1,22 @@
 -- name: GetDatabase :one
 SELECT id, environment_id, type, version, name, status, owns_container,
+       run_migrate, seed_from_database_id, seed_from_snapshot_id,
        host, port, conn_secret_enc
 FROM managed_databases
 WHERE id = $1;
+
+-- name: GetProjectBuildConfigByEnvironment :one
+SELECT p.build_config, p.id AS project_id
+FROM environments e
+JOIN projects p ON p.id = e.project_id
+WHERE e.id = $1;
+
+-- name: GetLatestSuccessfulDeploymentForEnvironment :one
+SELECT id
+FROM deployments
+WHERE environment_id = $1 AND status = 'SUCCEEDED'
+ORDER BY finished_at DESC NULLS LAST
+LIMIT 1;
 
 -- name: ListReadyDatabasesByEnvironment :many
 SELECT id, name, host, port, conn_secret_enc

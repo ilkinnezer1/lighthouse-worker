@@ -337,7 +337,10 @@ CREATE TABLE public.managed_databases (
     error_summary text,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
-    owns_container boolean DEFAULT true NOT NULL
+    owns_container boolean DEFAULT true NOT NULL,
+    run_migrate boolean DEFAULT false NOT NULL,
+    seed_from_database_id uuid,
+    seed_from_snapshot_id uuid
 );
 
 
@@ -611,6 +614,13 @@ CREATE INDEX managed_databases_environment_id_idx ON public.managed_databases US
 
 
 --
+-- Name: managed_databases_environment_id_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX managed_databases_environment_id_name_key ON public.managed_databases USING btree (environment_id, name);
+
+
+--
 -- Name: projects_owner_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -736,6 +746,22 @@ ALTER TABLE ONLY public.git_credentials
 
 ALTER TABLE ONLY public.managed_databases
     ADD CONSTRAINT managed_databases_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: managed_databases managed_databases_seed_from_database_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.managed_databases
+    ADD CONSTRAINT managed_databases_seed_from_database_id_fkey FOREIGN KEY (seed_from_database_id) REFERENCES public.managed_databases(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: managed_databases managed_databases_seed_from_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.managed_databases
+    ADD CONSTRAINT managed_databases_seed_from_snapshot_id_fkey FOREIGN KEY (seed_from_snapshot_id) REFERENCES public.database_snapshots(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 
 --
