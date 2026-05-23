@@ -12,6 +12,114 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type DatabaseStatus string
+
+const (
+	DatabaseStatusPROVISIONING DatabaseStatus = "PROVISIONING"
+	DatabaseStatusREADY        DatabaseStatus = "READY"
+	DatabaseStatusFAILED       DatabaseStatus = "FAILED"
+)
+
+func (e *DatabaseStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DatabaseStatus(s)
+	case string:
+		*e = DatabaseStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DatabaseStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDatabaseStatus struct {
+	DatabaseStatus DatabaseStatus
+	Valid          bool // Valid is true if DatabaseStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDatabaseStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DatabaseStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DatabaseStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDatabaseStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DatabaseStatus), nil
+}
+
+func (e DatabaseStatus) Valid() bool {
+	switch e {
+	case DatabaseStatusPROVISIONING,
+		DatabaseStatusREADY,
+		DatabaseStatusFAILED:
+		return true
+	}
+	return false
+}
+
+type DatabaseType string
+
+const (
+	DatabaseTypePOSTGRES DatabaseType = "POSTGRES"
+	DatabaseTypeMYSQL    DatabaseType = "MYSQL"
+	DatabaseTypeREDIS    DatabaseType = "REDIS"
+	DatabaseTypeMONGO    DatabaseType = "MONGO"
+)
+
+func (e *DatabaseType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DatabaseType(s)
+	case string:
+		*e = DatabaseType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DatabaseType: %T", src)
+	}
+	return nil
+}
+
+type NullDatabaseType struct {
+	DatabaseType DatabaseType
+	Valid        bool // Valid is true if DatabaseType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDatabaseType) Scan(value interface{}) error {
+	if value == nil {
+		ns.DatabaseType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DatabaseType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDatabaseType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DatabaseType), nil
+}
+
+func (e DatabaseType) Valid() bool {
+	switch e {
+	case DatabaseTypePOSTGRES,
+		DatabaseTypeMYSQL,
+		DatabaseTypeREDIS,
+		DatabaseTypeMONGO:
+		return true
+	}
+	return false
+}
+
 type DeploymentStageStatus string
 
 const (
@@ -297,6 +405,59 @@ func (e IdentityProvider) Valid() bool {
 	return false
 }
 
+type SnapshotStatus string
+
+const (
+	SnapshotStatusPENDING SnapshotStatus = "PENDING"
+	SnapshotStatusREADY   SnapshotStatus = "READY"
+	SnapshotStatusFAILED  SnapshotStatus = "FAILED"
+)
+
+func (e *SnapshotStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SnapshotStatus(s)
+	case string:
+		*e = SnapshotStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SnapshotStatus: %T", src)
+	}
+	return nil
+}
+
+type NullSnapshotStatus struct {
+	SnapshotStatus SnapshotStatus
+	Valid          bool // Valid is true if SnapshotStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSnapshotStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.SnapshotStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SnapshotStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSnapshotStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SnapshotStatus), nil
+}
+
+func (e SnapshotStatus) Valid() bool {
+	switch e {
+	case SnapshotStatusPENDING,
+		SnapshotStatusREADY,
+		SnapshotStatusFAILED:
+		return true
+	}
+	return false
+}
+
 type UserRole string
 
 const (
@@ -361,6 +522,16 @@ type AuditLog struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type DatabaseSnapshot struct {
+	ID           pgtype.UUID
+	DatabaseID   pgtype.UUID
+	Status       SnapshotStatus
+	StorageKey   *string
+	SizeBytes    *int64
+	ErrorSummary *string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Deployment struct {
 	ID                pgtype.UUID
 	EnvironmentID     pgtype.UUID
@@ -422,6 +593,22 @@ type GitCredential struct {
 	Fingerprint *string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+}
+
+type ManagedDatabase struct {
+	ID            pgtype.UUID
+	EnvironmentID pgtype.UUID
+	Type          DatabaseType
+	Version       string
+	Name          string
+	Status        DatabaseStatus
+	Host          *string
+	Port          *int32
+	ConnSecretEnc *string
+	ErrorSummary  *string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	OwnsContainer bool
 }
 
 type PrismaMigration struct {

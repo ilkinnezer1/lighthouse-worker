@@ -33,6 +33,29 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 
 
 --
+-- Name: DatabaseStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."DatabaseStatus" AS ENUM (
+    'PROVISIONING',
+    'READY',
+    'FAILED'
+);
+
+
+--
+-- Name: DatabaseType; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."DatabaseType" AS ENUM (
+    'POSTGRES',
+    'MYSQL',
+    'REDIS',
+    'MONGO'
+);
+
+
+--
 -- Name: DeploymentStageStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -94,6 +117,17 @@ CREATE TYPE public."IdentityProvider" AS ENUM (
     'GITHUB',
     'GOOGLE',
     'ATLASSIAN'
+);
+
+
+--
+-- Name: SnapshotStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SnapshotStatus" AS ENUM (
+    'PENDING',
+    'READY',
+    'FAILED'
 );
 
 
@@ -162,6 +196,21 @@ CREATE SEQUENCE public.audit_log_id_seq
 --
 
 ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
+
+
+--
+-- Name: database_snapshots; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.database_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    database_id uuid NOT NULL,
+    status public."SnapshotStatus" DEFAULT 'PENDING'::public."SnapshotStatus" NOT NULL,
+    storage_key text,
+    size_bytes bigint,
+    error_summary text,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
 
 
 --
@@ -272,6 +321,27 @@ CREATE TABLE public.git_credentials (
 
 
 --
+-- Name: managed_databases; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.managed_databases (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    type public."DatabaseType" NOT NULL,
+    version text NOT NULL,
+    name text NOT NULL,
+    status public."DatabaseStatus" DEFAULT 'PROVISIONING'::public."DatabaseStatus" NOT NULL,
+    host text,
+    port integer,
+    conn_secret_enc text,
+    error_summary text,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL,
+    owns_container boolean DEFAULT true NOT NULL
+);
+
+
+--
 -- Name: projects; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -376,6 +446,14 @@ ALTER TABLE ONLY public.audit_log
 
 
 --
+-- Name: database_snapshots database_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.database_snapshots
+    ADD CONSTRAINT database_snapshots_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: deployment_stages deployment_stages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -416,6 +494,14 @@ ALTER TABLE ONLY public.git_credentials
 
 
 --
+-- Name: managed_databases managed_databases_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.managed_databases
+    ADD CONSTRAINT managed_databases_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -452,6 +538,13 @@ ALTER TABLE ONLY public.users
 --
 
 CREATE INDEX audit_log_actor_user_id_created_at_idx ON public.audit_log USING btree (actor_user_id, created_at DESC);
+
+
+--
+-- Name: database_snapshots_database_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX database_snapshots_database_id_created_at_idx ON public.database_snapshots USING btree (database_id, created_at DESC);
 
 
 --
@@ -508,6 +601,13 @@ CREATE INDEX event_outbox_drained_at_idx ON public.event_outbox USING btree (dra
 --
 
 CREATE INDEX git_credentials_user_id_idx ON public.git_credentials USING btree (user_id);
+
+
+--
+-- Name: managed_databases_environment_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX managed_databases_environment_id_idx ON public.managed_databases USING btree (environment_id);
 
 
 --
@@ -575,6 +675,14 @@ ALTER TABLE ONLY public.audit_log
 
 
 --
+-- Name: database_snapshots database_snapshots_database_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.database_snapshots
+    ADD CONSTRAINT database_snapshots_database_id_fkey FOREIGN KEY (database_id) REFERENCES public.managed_databases(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: deployment_stages deployment_stages_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -620,6 +728,14 @@ ALTER TABLE ONLY public.event_outbox
 
 ALTER TABLE ONLY public.git_credentials
     ADD CONSTRAINT git_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: managed_databases managed_databases_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.managed_databases
+    ADD CONSTRAINT managed_databases_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --

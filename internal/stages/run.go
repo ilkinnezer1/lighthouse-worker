@@ -68,6 +68,15 @@ func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) err
 			return fmt.Errorf("container remove %s: %w", c.ID[:12], err)
 		}
 	}
+	nets, err := r.docker.NetworkList(ctx, network.ListOptions{Filters: args})
+	if err != nil {
+		return fmt.Errorf("list compose networks: %w", err)
+	}
+	for _, n := range nets {
+		if err := r.docker.NetworkRemove(ctx, n.ID); err != nil && !errdefs.IsNotFound(err) {
+			return fmt.Errorf("network remove %s: %w", n.Name, err)
+		}
+	}
 	if err := r.q.DeleteServicesByDeployment(ctx, db.MustUUID(dep.ID)); err != nil {
 		return fmt.Errorf("delete services: %w", err)
 	}
