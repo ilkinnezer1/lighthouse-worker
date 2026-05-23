@@ -5,7 +5,12 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/docker/docker/client"
+
+	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
+	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/minio"
 )
 
 const (
@@ -13,7 +18,7 @@ const (
 	JobTeardown       = "teardown"
 	JobSnapshot       = "snapshot"
 	JobRestore        = "restore"
-	JobSnapshotDelete = "snapshot-delete"
+	JobSnapshotDelete = "snapshot_delete"
 
 	fieldType       = "type"
 	fieldDatabaseID = "databaseId"
@@ -21,11 +26,21 @@ const (
 )
 
 type Router struct {
-	log *slog.Logger
+	docker *client.Client
+	q      *dbgen.Queries
+	crypto *crypto.Cipher
+	mc     *minio.Client
+	log    *slog.Logger
 }
 
-func NewRouter(log *slog.Logger) *Router {
-	return &Router{log: logger.Ctx(log, "Database")}
+func NewRouter(docker *client.Client, q *dbgen.Queries, cipher *crypto.Cipher, mc *minio.Client, log *slog.Logger) *Router {
+	return &Router{
+		docker: docker,
+		q:      q,
+		crypto: cipher,
+		mc:     mc,
+		log:    logger.Ctx(log, "Database"),
+	}
 }
 
 func (r *Router) Route(ctx context.Context, fields map[string]string) error {
@@ -36,24 +51,18 @@ func (r *Router) Route(ctx context.Context, fields map[string]string) error {
 	}
 	snapshotID := fields[fieldSnapshotID]
 
-	log := r.log.With(slog.String("type", jobType), slog.String("databaseId", databaseID))
-	if snapshotID != "" {
-		log = log.With(slog.String("snapshotId", snapshotID))
-	}
-
 	switch jobType {
 	case JobProvision:
-		log.Info("provision requested (stub)")
+		return r.provision(ctx, databaseID)
 	case JobTeardown:
-		log.Info("teardown requested (stub)")
+		return r.teardown(ctx, databaseID)
 	case JobSnapshot:
-		log.Info("snapshot requested (stub)")
+		return r.snapshot(ctx, databaseID, snapshotID)
 	case JobRestore:
-		log.Info("restore requested (stub)")
+		return r.restore(ctx, databaseID, snapshotID)
 	case JobSnapshotDelete:
-		log.Info("snapshot-delete requested (stub)")
+		return r.snapshotDelete(ctx, snapshotID)
 	default:
 		return fmt.Errorf("unknown job type %q", jobType)
 	}
-	return nil
 }

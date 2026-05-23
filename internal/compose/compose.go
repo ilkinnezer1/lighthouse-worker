@@ -47,6 +47,22 @@ func findFile(workDir string) (string, error) {
 	return "", fmt.Errorf("no compose file in %s", workDir)
 }
 
+// InjectEnv adds environment variables to every service. Existing keys are
+// overwritten — caller is the authority on these (e.g. lighthouse-managed
+// DATABASE_URL takes precedence over anything the user put in their compose).
+func InjectEnv(project *types.Project, vars map[string]string) {
+	for name, svc := range project.Services {
+		if svc.Environment == nil {
+			svc.Environment = types.MappingWithEquals{}
+		}
+		for k, v := range vars {
+			val := v
+			svc.Environment[k] = &val
+		}
+		project.Services[name] = svc
+	}
+}
+
 // AttachExternalNetwork ensures the named external network exists on the
 // project and that the given service is attached to it.
 func AttachExternalNetwork(project *types.Project, serviceName, networkName string) error {

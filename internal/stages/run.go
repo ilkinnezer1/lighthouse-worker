@@ -15,6 +15,7 @@ import (
 	"github.com/docker/docker/errdefs"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/compose"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
@@ -33,11 +34,42 @@ type Run struct {
 	docker *client.Client
 	logs   *logstream.Writer
 	q      *dbgen.Queries
+	cipher *crypto.Cipher
 	mode   routing.Mode
 }
 
-func NewRun(docker *client.Client, logs *logstream.Writer, q *dbgen.Queries, mode routing.Mode) *Run {
-	return &Run{docker: docker, logs: logs, q: q, mode: mode}
+func NewRun(docker *client.Client, logs *logstream.Writer, q *dbgen.Queries, cipher *crypto.Cipher, mode routing.Mode) *Run {
+	return &Run{docker: docker, logs: logs, q: q, cipher: cipher, mode: mode}
+}
+
+// databaseEnvs returns env vars to inject into deployment containers for any
+// READY managed databases attached to the deployment's environment.
+// DATABASE_URL points at the first one (deterministic by insertion order from
+// the query). Each is also exposed as DATABASE_URL_<UPPER_NAME>.
+func (r *Run) databaseEnvs(ctx context.Context, dep *pipeline.Deployment) (map[string]string, error) {
+	envUUID := db.MustUUID(dep.EnvironmentID)
+	rows, err := r.q.ListReadyDatabasesByEnvironment(ctx, envUUID)
+	if err != nil {
+		return nil, fmt.Errorf("list ready databases: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	env := make(map[string]string, len(rows)+1)
+	for i, row := range rows {
+		if row.ConnSecretEnc == nil || *row.ConnSecretEnc == "" {
+			continue
+		}
+		conn, err := r.cipher.Decrypt(*row.ConnSecretEnc)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt conn for %s: %w", row.Name, err)
+		}
+		if i == 0 {
+			env["DATABASE_URL"] = conn
+		}
+		env["DATABASE_URL_"+strings.ToUpper(row.Name)] = conn
+	}
+	return env, nil
 }
 
 func (*Run) Name() string { return "run" }
@@ -99,7 +131,12 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment) error
 		return err
 	}
 
-	containerID, err := r.startContainer(ctx, dep)
+	envs, err := r.databaseEnvs(ctx, dep)
+	if err != nil {
+		return err
+	}
+
+	containerID, err := r.startContainer(ctx, dep, envs)
 	if err != nil {
 		return err
 	}
@@ -131,6 +168,14 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
 	}
 	if err := compose.AttachExternalNetwork(project, web, publicNetwork); err != nil {
 		return fmt.Errorf("attach traefik network: %w", err)
+	}
+
+	envs, err := r.databaseEnvs(ctx, dep)
+	if err != nil {
+		return err
+	}
+	if len(envs) > 0 {
+		compose.InjectEnv(project, envs)
 	}
 
 	if err := r.ensureNetwork(ctx); err != nil {
@@ -204,11 +249,12 @@ func (r *Run) ensureNetwork(ctx context.Context) error {
 	return fmt.Errorf("create network: %w", err)
 }
 
-func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment) (string, error) {
+func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs map[string]string) (string, error) {
 	name := containerName(dep.ID)
 	cfg := &container.Config{
 		Image:  ImageTag(dep.ID),
 		Labels: traefikLabels(dep, r.mode),
+		Env:    envSlice(envs),
 	}
 	hostCfg := &container.HostConfig{
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
@@ -277,6 +323,17 @@ func traefikLabels(dep *pipeline.Deployment, mode routing.Mode) map[string]strin
 
 func containerName(deploymentID string) string {
 	return "deploy-" + deploymentID
+}
+
+func envSlice(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	return out
 }
 
 func isAlreadyExists(err error) bool {

@@ -14,12 +14,14 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/config"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/database"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/httpx"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/minio"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/queue"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/redisx"
@@ -76,10 +78,16 @@ func main() {
 	q := dbgen.New(pool)
 	logs := logstream.New(rdb)
 	mode := routing.Mode(cfg.Mode)
+
+	cipher, err := crypto.New(cfg.MasterEncryptionKey)
+	if err != nil {
+		boot.Error("crypto init failed", slog.Any("err", err))
+		os.Exit(1)
+	}
 	stageList := []pipeline.Stage{
 		stages.NewClone(logs),
 		stages.NewBuild(logs),
-		stages.NewRun(docker, logs, q, mode),
+		stages.NewRun(docker, logs, q, cipher, mode),
 	}
 	cancelListener := cancelbus.New(rdb, root)
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
@@ -102,7 +110,12 @@ func main() {
 		LogLabel: "Queue.teardown",
 	}, teardownRunner.Run)
 
-	databaseRouter := database.NewRouter(root)
+	mc, err := minio.New(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, false, root)
+	if err != nil {
+		boot.Error("minio init failed", slog.Any("err", err))
+		os.Exit(1)
+	}
+	databaseRouter := database.NewRouter(docker, q, cipher, mc, root)
 	databaseConsumer := queue.NewFields(rdb, root, queue.Config{
 		Stream:   "jobs:database",
 		Group:    "worker",
