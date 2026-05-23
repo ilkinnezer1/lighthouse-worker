@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/config"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/database"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/httpx"
@@ -101,12 +102,20 @@ func main() {
 		LogLabel: "Queue.teardown",
 	}, teardownRunner.Run)
 
+	databaseRouter := database.NewRouter(root)
+	databaseConsumer := queue.NewFields(rdb, root, queue.Config{
+		Stream:   "jobs:database",
+		Group:    "worker",
+		LogLabel: "Queue.database",
+	}, databaseRouter.Route)
+
 	boot.Info("ready")
 
 	g, gCtx := errgroup.WithContext(ctx)
 	g.Go(func() error { return srv.Run(gCtx) })
 	g.Go(func() error { return buildConsumer.Run(gCtx) })
 	g.Go(func() error { return teardownConsumer.Run(gCtx) })
+	g.Go(func() error { return databaseConsumer.Run(gCtx) })
 
 	if err := g.Wait(); err != nil {
 		boot.Error("stopped with error", slog.Any("err", err))

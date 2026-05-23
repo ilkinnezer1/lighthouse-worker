@@ -17,6 +17,10 @@ type Config struct {
 	WorkDir             string
 	Mode                string
 	BaseDomain          string
+	MinIOEndpoint       string
+	MinIOAccessKey      string
+	MinIOSecretKey      string
+	MinIOBucket         string
 }
 
 func Load() (*Config, error) {
@@ -31,6 +35,10 @@ func Load() (*Config, error) {
 		WorkDir:             getEnv("WORK_DIR", "./data/deployments"),
 		Mode:                getEnv("MODE", "local"),
 		BaseDomain:          getEnv("BASE_DOMAIN", "localhost"),
+		MinIOEndpoint:       getEnv("MINIO_ENDPOINT", "localhost:9000"),
+		MinIOAccessKey:      os.Getenv("MINIO_ACCESS_KEY"),
+		MinIOSecretKey:      os.Getenv("MINIO_SECRET_KEY"),
+		MinIOBucket:         getEnv("MINIO_BUCKET", "snapshots"),
 	}
 
 	var missing []string

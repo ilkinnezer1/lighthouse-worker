@@ -17,22 +17,39 @@ import (
 // Returning nil triggers XACK; a non-nil error leaves the message in PEL.
 type Handler func(ctx context.Context, payloadID string) error
 
+// FieldsHandler receives every field of the stream entry as a string map.
+// Useful when a message has more than one payload field (e.g. type + ids).
+type FieldsHandler func(ctx context.Context, fields map[string]string) error
+
 type Config struct {
 	Stream   string
 	Group    string
-	IDField  string
+	IDField  string // required for Handler; ignored for FieldsHandler
 	LogLabel string
 }
 
 type Consumer struct {
-	rdb      *redis.Client
-	log      *slog.Logger
-	cfg      Config
-	consumer string // "<hostname>-<pid>"
-	handler  Handler
+	rdb           *redis.Client
+	log           *slog.Logger
+	cfg           Config
+	consumer      string // "<hostname>-<pid>"
+	handler       Handler
+	fieldsHandler FieldsHandler
 }
 
 func New(rdb *redis.Client, log *slog.Logger, cfg Config, handler Handler) *Consumer {
+	c := newBase(rdb, log, cfg)
+	c.handler = handler
+	return c
+}
+
+func NewFields(rdb *redis.Client, log *slog.Logger, cfg Config, handler FieldsHandler) *Consumer {
+	c := newBase(rdb, log, cfg)
+	c.fieldsHandler = handler
+	return c
+}
+
+func newBase(rdb *redis.Client, log *slog.Logger, cfg Config) *Consumer {
 	host, err := os.Hostname()
 	if err != nil || host == "" {
 		host = "worker"
@@ -46,7 +63,6 @@ func New(rdb *redis.Client, log *slog.Logger, cfg Config, handler Handler) *Cons
 		log:      logger.Ctx(log, label),
 		cfg:      cfg,
 		consumer: fmt.Sprintf("%s-%d", host, os.Getpid()),
-		handler:  handler,
 	}
 }
 
@@ -114,6 +130,11 @@ func (c *Consumer) ensureGroup(ctx context.Context) error {
 }
 
 func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
+	if c.fieldsHandler != nil {
+		c.dispatchFields(ctx, msg)
+		return
+	}
+
 	payloadID, ok := msg.Values[c.cfg.IDField].(string)
 	if !ok || payloadID == "" {
 		c.log.Error("malformed job, acking and skipping",
@@ -134,6 +155,27 @@ func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
 	if err := c.handler(ctx, payloadID); err != nil {
 		c.log.Error("handler failed — leaving in PEL",
 			slog.String(c.cfg.IDField, payloadID),
+			slog.String("messageId", msg.ID),
+			slog.Any("err", err),
+		)
+		return
+	}
+
+	if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msg.ID).Err(); err != nil {
+		c.log.Error("ack failed", slog.String("messageId", msg.ID), slog.Any("err", err))
+	}
+}
+
+func (c *Consumer) dispatchFields(ctx context.Context, msg redis.XMessage) {
+	fields := make(map[string]string, len(msg.Values))
+	for k, v := range msg.Values {
+		if s, ok := v.(string); ok {
+			fields[k] = s
+		}
+	}
+
+	if err := c.fieldsHandler(ctx, fields); err != nil {
+		c.log.Error("handler failed — leaving in PEL",
 			slog.String("messageId", msg.ID),
 			slog.Any("err", err),
 		)
