@@ -55,6 +55,45 @@ func (q *Queries) GetCancelRequestedAt(ctx context.Context, id pgtype.UUID) (pgt
 	return cancel_requested_at, err
 }
 
+const getDeploymentBranches = `-- name: GetDeploymentBranches :many
+SELECT role, name, sha, ordinal
+FROM deployment_branches
+WHERE deployment_id = $1
+ORDER BY ordinal
+`
+
+type GetDeploymentBranchesRow struct {
+	Role    DeploymentBranchRole
+	Name    string
+	Sha     *string
+	Ordinal int32
+}
+
+func (q *Queries) GetDeploymentBranches(ctx context.Context, deploymentID pgtype.UUID) ([]GetDeploymentBranchesRow, error) {
+	rows, err := q.db.Query(ctx, getDeploymentBranches, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDeploymentBranchesRow
+	for rows.Next() {
+		var i GetDeploymentBranchesRow
+		if err := rows.Scan(
+			&i.Role,
+			&i.Name,
+			&i.Sha,
+			&i.Ordinal,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDeploymentForJob = `-- name: GetDeploymentForJob :one
 SELECT d.id,
        d.environment_id,

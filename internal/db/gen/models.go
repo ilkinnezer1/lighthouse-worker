@@ -120,6 +120,57 @@ func (e DatabaseType) Valid() bool {
 	return false
 }
 
+type DeploymentBranchRole string
+
+const (
+	DeploymentBranchRoleSOURCE DeploymentBranchRole = "SOURCE"
+	DeploymentBranchRoleMERGE  DeploymentBranchRole = "MERGE"
+)
+
+func (e *DeploymentBranchRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DeploymentBranchRole(s)
+	case string:
+		*e = DeploymentBranchRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DeploymentBranchRole: %T", src)
+	}
+	return nil
+}
+
+type NullDeploymentBranchRole struct {
+	DeploymentBranchRole DeploymentBranchRole
+	Valid                bool // Valid is true if DeploymentBranchRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDeploymentBranchRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.DeploymentBranchRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DeploymentBranchRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDeploymentBranchRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DeploymentBranchRole), nil
+}
+
+func (e DeploymentBranchRole) Valid() bool {
+	switch e {
+	case DeploymentBranchRoleSOURCE,
+		DeploymentBranchRoleMERGE:
+		return true
+	}
+	return false
+}
+
 type DeploymentStageStatus string
 
 const (
@@ -546,6 +597,15 @@ type Deployment struct {
 	CancelRequestedAt pgtype.Timestamptz
 	ErrorSummary      *string
 	CreatedAt         pgtype.Timestamptz
+}
+
+type DeploymentBranch struct {
+	ID           pgtype.UUID
+	DeploymentID pgtype.UUID
+	Role         DeploymentBranchRole
+	Name         string
+	Sha          *string
+	Ordinal      int32
 }
 
 type DeploymentStage struct {

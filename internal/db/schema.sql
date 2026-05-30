@@ -56,6 +56,16 @@ CREATE TYPE public."DatabaseType" AS ENUM (
 
 
 --
+-- Name: DeploymentBranchRole; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."DeploymentBranchRole" AS ENUM (
+    'SOURCE',
+    'MERGE'
+);
+
+
+--
 -- Name: DeploymentStageStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -228,6 +238,20 @@ CREATE TABLE public.deployment_stages (
     error_json jsonb,
     attempt integer DEFAULT 0 NOT NULL,
     max_attempts integer DEFAULT 1 NOT NULL
+);
+
+
+--
+-- Name: deployment_branches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deployment_branches (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deployment_id uuid NOT NULL,
+    role public."DeploymentBranchRole" NOT NULL,
+    name text NOT NULL,
+    sha text,
+    ordinal integer NOT NULL
 );
 
 
@@ -457,6 +481,14 @@ ALTER TABLE ONLY public.database_snapshots
 
 
 --
+-- Name: deployment_branches deployment_branches_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployment_branches
+    ADD CONSTRAINT deployment_branches_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: deployment_stages deployment_stages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -548,6 +580,20 @@ CREATE INDEX audit_log_actor_user_id_created_at_idx ON public.audit_log USING bt
 --
 
 CREATE INDEX database_snapshots_database_id_created_at_idx ON public.database_snapshots USING btree (database_id, created_at DESC);
+
+
+--
+-- Name: deployment_branches_deployment_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX deployment_branches_deployment_id_idx ON public.deployment_branches USING btree (deployment_id);
+
+
+--
+-- Name: deployment_branches_deployment_id_ordinal_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX deployment_branches_deployment_id_ordinal_key ON public.deployment_branches USING btree (deployment_id, ordinal);
 
 
 --
@@ -690,6 +736,14 @@ ALTER TABLE ONLY public.audit_log
 
 ALTER TABLE ONLY public.database_snapshots
     ADD CONSTRAINT database_snapshots_database_id_fkey FOREIGN KEY (database_id) REFERENCES public.managed_databases(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: deployment_branches deployment_branches_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deployment_branches
+    ADD CONSTRAINT deployment_branches_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --

@@ -53,6 +53,10 @@ func (r *Runner) Run(ctx context.Context, deploymentID string) error {
 
 	dep := buildDeployment(row, deploymentID, r.workDirBase, r.mode, r.baseDomain)
 
+	if err := r.loadBranches(ctx, dep); err != nil {
+		return err
+	}
+
 	r.log.Info("running deployment",
 		slog.String("deploymentId", deploymentID),
 		slog.String("repo", dep.RepoURL),
@@ -90,6 +94,31 @@ func (r *Runner) cancelAtPickup(ctx context.Context, row dbgen.GetDeploymentForJ
 		Payload: payload,
 	}); err != nil {
 		r.log.Warn("outbox cancelled event", slog.Any("err", err))
+	}
+	return nil
+}
+
+// loadBranches attaches the deployment's SHA-pinned branch set, if any. The
+// SOURCE branch name also overrides dep.Branch so logs and the clone agree.
+func (r *Runner) loadBranches(ctx context.Context, dep *Deployment) error {
+	id, err := db.ParseUUID(dep.ID)
+	if err != nil {
+		return err
+	}
+	rows, err := r.q.GetDeploymentBranches(ctx, id)
+	if err != nil {
+		return fmt.Errorf("load deployment branches: %w", err)
+	}
+	for _, row := range rows {
+		sha := ""
+		if row.Sha != nil {
+			sha = *row.Sha
+		}
+		b := Branch{Merge: row.Role == dbgen.DeploymentBranchRoleMERGE, Name: row.Name, Sha: sha}
+		dep.Branches = append(dep.Branches, b)
+		if !b.Merge {
+			dep.Branch = b.Name
+		}
 	}
 	return nil
 }
@@ -149,4 +178,3 @@ func branchOrDefault(row dbgen.GetDeploymentForJobRow) string {
 	}
 	return row.DefaultBranch
 }
-

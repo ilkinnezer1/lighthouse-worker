@@ -22,6 +22,12 @@ FROM deployments d
          JOIN users u ON u.id = p.owner_id
 WHERE d.id = $1;
 
+-- name: GetDeploymentBranches :many
+SELECT role, name, sha, ordinal
+FROM deployment_branches
+WHERE deployment_id = $1
+ORDER BY ordinal;
+
 -- name: GetCancelRequestedAt :one
 SELECT cancel_requested_at
 FROM deployments
