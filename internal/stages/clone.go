@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
@@ -17,6 +18,9 @@ const (
 	mergeAuthorName  = "Lighthouse"
 	mergeAuthorEmail = "deploy@lighthouse"
 )
+
+// mergeTimeout bounds a single git merge so a pathological merge can't hang the build.
+const mergeTimeout = 10 * time.Minute
 
 type Clone struct {
 	logs *logstream.Writer
@@ -95,7 +99,10 @@ func (c *Clone) runMerge(ctx context.Context, dep *pipeline.Deployment) error {
 			"-m", "Merge branch '" + b.Name + "' into " + source.Name,
 			"FETCH_HEAD",
 		}
-		if err := c.git(ctx, dep, merge...); err != nil {
+		mctx, cancel := context.WithTimeout(ctx, mergeTimeout)
+		err := c.git(mctx, dep, merge...)
+		cancel()
+		if err != nil {
 			conflicts := gitConflicts(ctx, dep.WorkDir)
 			_ = c.git(ctx, dep, "merge", "--abort")
 			if len(conflicts) > 0 {
