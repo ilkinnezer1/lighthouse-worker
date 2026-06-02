@@ -90,7 +90,17 @@ func (r *Run) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
 }
 
 func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) error {
-	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(dep.ID)))
+	if err := r.removeComposeResources(ctx, dep.ID); err != nil {
+		return err
+	}
+	if err := r.q.DeleteServicesByDeployment(ctx, db.MustUUID(dep.ID)); err != nil {
+		return fmt.Errorf("delete services: %w", err)
+	}
+	return nil
+}
+
+func (r *Run) removeComposeResources(ctx context.Context, deploymentID string) error {
+	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(deploymentID)))
 	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
 	if err != nil {
 		return fmt.Errorf("list compose containers: %w", err)
@@ -109,24 +119,29 @@ func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) err
 			return fmt.Errorf("network remove %s: %w", n.Name, err)
 		}
 	}
-	if err := r.q.DeleteServicesByDeployment(ctx, db.MustUUID(dep.ID)); err != nil {
-		return fmt.Errorf("delete services: %w", err)
-	}
 	return nil
 }
 
 func (r *Run) Run(ctx context.Context, dep *pipeline.Deployment) error {
-	switch detectStrategy(dep.WorkDir, parseBuildOverrides(dep.BuildConfig).Strategy) {
+	o := parseBuildOverrides(dep.BuildConfig)
+	switch detectStrategy(dep.WorkDir, o.Strategy) {
 	case StrategyDockerfile:
-		return r.runDockerfile(ctx, dep)
+		return r.runDockerfile(ctx, dep, o)
 	case StrategyCompose:
-		return r.runCompose(ctx, dep)
+		return r.runCompose(ctx, dep, o)
 	default:
 		return fmt.Errorf("no Dockerfile or compose file found in %s", dep.WorkDir)
 	}
 }
 
-func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment) error {
+func resolvePort(override int) int {
+	if override != 0 {
+		return override
+	}
+	return defaultPort
+}
+
+func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o buildOverrides) error {
 	if err := r.ensureNetwork(ctx); err != nil {
 		return err
 	}
@@ -136,10 +151,7 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment) error
 		return err
 	}
 
-	port := parseBuildOverrides(dep.BuildConfig).Port
-	if port == 0 {
-		port = defaultPort
-	}
+	port := resolvePort(o.Port)
 
 	containerID, err := r.startContainer(ctx, dep, envs, port)
 	if err != nil {
@@ -154,16 +166,14 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment) error
 	return nil
 }
 
-func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
+func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildOverrides) error {
 	project, err := compose.Parse(ctx, dep.WorkDir, composeProject(dep.ID))
 	if err != nil {
 		return fmt.Errorf("parse compose: %w", err)
 	}
-	compose.StripFixedNames(project)
-	compose.ScopeVolumes(project, dep.EnvironmentID)
+	compose.Normalize(project, dep.EnvironmentID)
 
-	overrides := parseBuildOverrides(dep.BuildConfig)
-	web := overrides.Web
+	web := o.Web
 	var port int
 	if web != "" {
 		if _, ok := project.Services[web]; !ok {
@@ -176,10 +186,9 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
 	if web == "" {
 		return fmt.Errorf("compose project has no services")
 	}
-	if overrides.Port != 0 {
-		port = overrides.Port
-	}
-	if port == 0 {
+	if o.Port != 0 {
+		port = o.Port
+	} else if port == 0 {
 		port = defaultPort
 	}
 
@@ -249,23 +258,10 @@ func (r *Run) supersedePrevious(ctx context.Context, dep *pipeline.Deployment) {
 
 // removeDeployment force-removes a deployment's containers and networks, covering
 // both strategies: compose resources by project label, plus the Dockerfile
-// single container named deploy-<id>.
+// single container named deploy-<id>. Best-effort — errors are ignored.
 func (r *Run) removeDeployment(ctx context.Context, curID, oldID string) {
-	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(oldID)))
-	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
-	if err == nil {
-		for _, c := range containers {
-			_ = r.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
-		}
-	}
+	_ = r.removeComposeResources(ctx, oldID)
 	_ = r.docker.ContainerRemove(ctx, containerName(oldID), container.RemoveOptions{Force: true})
-
-	nets, err := r.docker.NetworkList(ctx, network.ListOptions{Filters: args})
-	if err == nil {
-		for _, n := range nets {
-			_ = r.docker.NetworkRemove(ctx, n.ID)
-		}
-	}
 	if id, err := db.ParseUUID(oldID); err == nil {
 		_ = r.q.DeleteServicesByDeployment(ctx, id)
 	}

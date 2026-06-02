@@ -4,3 +4,6 @@
 *.out
 .idea/
 .vscode/
+
+# Deployment work dirs (cloned repos, node_modules, build artifacts) — runtime only
+/data/

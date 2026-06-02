@@ -97,6 +97,13 @@ func AttachExternalNetwork(project *types.Project, serviceName, networkName stri
 	return nil
 }
 
+// Normalize rewrites a parsed project for isolated per-deployment runs. Strip
+// before scope: name stripping must run before volumes are scoped.
+func Normalize(project *types.Project, envID string) {
+	StripFixedNames(project)
+	ScopeVolumes(project, envID)
+}
+
 func StripFixedNames(project *types.Project) {
 	for name, svc := range project.Services {
 		if svc.ContainerName != "" {
