@@ -9,6 +9,7 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
+	"github.com/joho/godotenv"
 )
 
 var fileNames = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
@@ -27,7 +28,7 @@ func Parse(ctx context.Context, workDir, projectName string) (*types.Project, er
 	project, err := loader.LoadWithContext(ctx, types.ConfigDetails{
 		WorkingDir:  workDir,
 		ConfigFiles: []types.ConfigFile{{Filename: file, Content: content}},
-		Environment: types.Mapping{},
+		Environment: dotEnv(workDir),
 	}, func(o *loader.Options) {
 		o.SetProjectName(projectName, true)
 	})
@@ -35,6 +36,15 @@ func Parse(ctx context.Context, workDir, projectName string) (*types.Project, er
 		return nil, fmt.Errorf("load compose: %w", err)
 	}
 	return project, nil
+}
+
+func dotEnv(workDir string) types.Mapping {
+	for _, name := range []string{".env", ".env.example"} {
+		if m, err := godotenv.Read(filepath.Join(workDir, name)); err == nil {
+			return types.Mapping(m)
+		}
+	}
+	return types.Mapping{}
 }
 
 func findFile(workDir string) (string, error) {
@@ -87,12 +97,16 @@ func AttachExternalNetwork(project *types.Project, serviceName, networkName stri
 	return nil
 }
 
-// StripFixedNames clears user-pinned global names (container_name, network/volume
-// name:) so the per-deployment project namespace isolates them instead of
-// colliding across deploys. External networks/volumes are left alone.
 func StripFixedNames(project *types.Project) {
 	for name, svc := range project.Services {
-		svc.ContainerName = ""
+		if svc.ContainerName != "" {
+			addNetworkAlias(&svc, svc.ContainerName)
+			svc.ContainerName = ""
+		}
+		for i := range svc.Ports {
+			svc.Ports[i].Published = ""
+			svc.Ports[i].HostIP = ""
+		}
 		project.Services[name] = svc
 	}
 	for name, net := range project.Networks {
@@ -102,12 +116,31 @@ func StripFixedNames(project *types.Project) {
 		net.Name = ""
 		project.Networks[name] = net
 	}
-	for name, vol := range project.Volumes {
+}
+
+func ScopeVolumes(project *types.Project, envID string) {
+	for key, vol := range project.Volumes {
 		if vol.External {
 			continue
 		}
-		vol.Name = ""
-		project.Volumes[name] = vol
+		vol.Name = "env-" + envID + "-" + key
+		project.Volumes[key] = vol
+	}
+}
+
+func addNetworkAlias(svc *types.ServiceConfig, alias string) {
+	if len(svc.Networks) == 0 {
+		svc.Networks = map[string]*types.ServiceNetworkConfig{
+			"default": {Aliases: []string{alias}},
+		}
+		return
+	}
+	for k, nc := range svc.Networks {
+		if nc == nil {
+			nc = &types.ServiceNetworkConfig{}
+		}
+		nc.Aliases = append(nc.Aliases, alias)
+		svc.Networks[k] = nc
 	}
 }
 
@@ -140,22 +173,33 @@ func InjectLabels(project *types.Project, serviceName string, labels map[string]
 	return nil
 }
 
-// WebService picks the service to expose publicly via Traefik. Preference:
-// first service with declared ports (alphabetically), then alphabetical first
-// of any service. Returns "" if the project has no services.
-func WebService(project *types.Project) string {
+func WebService(project *types.Project, preferred int) (string, int) {
 	names := make([]string, 0, len(project.Services))
 	for name := range project.Services {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if len(project.Services[name].Ports) > 0 {
-			return name
+		for _, p := range project.Services[name].Ports {
+			if int(p.Target) == preferred {
+				return name, preferred
+			}
+		}
+	}
+	for _, name := range names {
+		if ports := project.Services[name].Ports; len(ports) > 0 {
+			return name, int(ports[0].Target)
 		}
 	}
 	if len(names) > 0 {
-		return names[0]
+		return names[0], 0
 	}
-	return ""
+	return "", 0
+}
+
+func ServicePort(project *types.Project, name string) int {
+	if svc, ok := project.Services[name]; ok && len(svc.Ports) > 0 {
+		return int(svc.Ports[0].Target)
+	}
+	return 0
 }

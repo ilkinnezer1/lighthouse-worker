@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 )
@@ -62,6 +63,12 @@ func Load() (*Config, error) {
 	if cfg.Mode != "local" && cfg.Mode != "server" {
 		return nil, fmt.Errorf("MODE must be 'local' or 'server', got %q", cfg.Mode)
 	}
+
+	abs, err := filepath.Abs(cfg.WorkDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve WORK_DIR: %w", err)
+	}
+	cfg.WorkDir = abs
 
 	return cfg, nil
 }

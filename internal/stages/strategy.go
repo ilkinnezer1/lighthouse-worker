@@ -35,6 +35,7 @@ func detectStrategy(workDir, override string) string {
 type buildOverrides struct {
 	Strategy string `json:"strategy"`
 	Web      string `json:"web"`
+	Port     int    `json:"port"`
 }
 
 // parseBuildOverrides extracts the fields the worker reads from

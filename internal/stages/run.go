@@ -136,13 +136,22 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment) error
 		return err
 	}
 
-	containerID, err := r.startContainer(ctx, dep, envs)
+	port := parseBuildOverrides(dep.BuildConfig).Port
+	if port == 0 {
+		port = defaultPort
+	}
+
+	containerID, err := r.startContainer(ctx, dep, envs, port)
 	if err != nil {
 		return err
 	}
 
 	r.logLine(ctx, dep.ID, "container started: "+containerID[:12])
-	return r.recordService(ctx, dep, containerID)
+	if err := r.recordService(ctx, dep, containerID, port); err != nil {
+		return err
+	}
+	r.supersedePrevious(ctx, dep)
+	return nil
 }
 
 func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
@@ -151,20 +160,30 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
 		return fmt.Errorf("parse compose: %w", err)
 	}
 	compose.StripFixedNames(project)
+	compose.ScopeVolumes(project, dep.EnvironmentID)
 
-	web := parseBuildOverrides(dep.BuildConfig).Web
+	overrides := parseBuildOverrides(dep.BuildConfig)
+	web := overrides.Web
+	var port int
 	if web != "" {
 		if _, ok := project.Services[web]; !ok {
 			return fmt.Errorf("buildConfig.web=%q but no such service in compose", web)
 		}
+		port = compose.ServicePort(project, web)
 	} else {
-		web = compose.WebService(project)
+		web, port = compose.WebService(project, defaultPort)
 	}
 	if web == "" {
 		return fmt.Errorf("compose project has no services")
 	}
+	if overrides.Port != 0 {
+		port = overrides.Port
+	}
+	if port == 0 {
+		port = defaultPort
+	}
 
-	if err := compose.InjectLabels(project, web, traefikLabels(dep, r.mode)); err != nil {
+	if err := compose.InjectLabels(project, web, traefikLabels(dep, r.mode, port)); err != nil {
 		return fmt.Errorf("inject traefik labels: %w", err)
 	}
 	if err := compose.AttachExternalNetwork(project, web, publicNetwork); err != nil {
@@ -199,7 +218,58 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
 	}
 
 	r.logLine(ctx, dep.ID, "compose project up: web service = "+web)
-	return r.recordComposeServices(ctx, dep, project, web)
+	if err := r.recordComposeServices(ctx, dep, project, web); err != nil {
+		return err
+	}
+	r.supersedePrevious(ctx, dep)
+	return nil
+}
+
+// supersedePrevious tears down older deployments of the same environment once the
+// new one is up. Best-effort: it must never roll back the deploy that succeeded.
+func (r *Run) supersedePrevious(ctx context.Context, dep *pipeline.Deployment) {
+	envID, err := db.ParseUUID(dep.EnvironmentID)
+	if err != nil {
+		r.logLine(ctx, dep.ID, "supersede: bad environment id: "+err.Error())
+		return
+	}
+	prior, err := r.q.ListDeploymentIDsByEnvironment(ctx, envID)
+	if err != nil {
+		r.logLine(ctx, dep.ID, "supersede: list deployments: "+err.Error())
+		return
+	}
+	for _, d := range prior {
+		oldID := db.UUIDString(d.ID)
+		if oldID == dep.ID {
+			continue
+		}
+		r.removeDeployment(ctx, dep.ID, oldID)
+	}
+}
+
+// removeDeployment force-removes a deployment's containers and networks, covering
+// both strategies: compose resources by project label, plus the Dockerfile
+// single container named deploy-<id>.
+func (r *Run) removeDeployment(ctx context.Context, curID, oldID string) {
+	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(oldID)))
+	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
+	if err == nil {
+		for _, c := range containers {
+			_ = r.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true})
+		}
+	}
+	_ = r.docker.ContainerRemove(ctx, containerName(oldID), container.RemoveOptions{Force: true})
+
+	nets, err := r.docker.NetworkList(ctx, network.ListOptions{Filters: args})
+	if err == nil {
+		for _, n := range nets {
+			_ = r.docker.NetworkRemove(ctx, n.ID)
+		}
+	}
+	if id, err := db.ParseUUID(oldID); err == nil {
+		_ = r.q.DeleteServicesByDeployment(ctx, id)
+	}
+	r.logLine(ctx, curID, "superseded previous deployment "+oldID)
 }
 
 func (r *Run) recordComposeServices(ctx context.Context, dep *pipeline.Deployment, project *composetypes.Project, web string) error {
@@ -250,11 +320,11 @@ func (r *Run) ensureNetwork(ctx context.Context) error {
 	return fmt.Errorf("create network: %w", err)
 }
 
-func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs map[string]string) (string, error) {
+func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs map[string]string, port int) (string, error) {
 	name := containerName(dep.ID)
 	cfg := &container.Config{
 		Image:  ImageTag(dep.ID),
-		Labels: traefikLabels(dep, r.mode),
+		Labels: traefikLabels(dep, r.mode, port),
 		Env:    envSlice(envs),
 	}
 	hostCfg := &container.HostConfig{
@@ -276,8 +346,8 @@ func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs
 	return created.ID, nil
 }
 
-func (r *Run) recordService(ctx context.Context, dep *pipeline.Deployment, containerID string) error {
-	port := int32(defaultPort)
+func (r *Run) recordService(ctx context.Context, dep *pipeline.Deployment, containerID string, portNum int) error {
+	port := int32(portNum)
 	containerName := containerName(dep.ID)
 	image := ImageTag(dep.ID)
 	status := "running"
@@ -302,7 +372,7 @@ func (r *Run) logLine(ctx context.Context, deploymentID, line string) {
 	_ = r.logs.WriteLine(ctx, deploymentID, "run", line)
 }
 
-func traefikLabels(dep *pipeline.Deployment, mode routing.Mode) map[string]string {
+func traefikLabels(dep *pipeline.Deployment, mode routing.Mode, port int) map[string]string {
 	router := "deploy-" + dep.ID
 	rule := fmt.Sprintf("Host(`%s`)", dep.Host)
 	entrypoint := "web"
@@ -313,7 +383,7 @@ func traefikLabels(dep *pipeline.Deployment, mode routing.Mode) map[string]strin
 		"traefik.enable": "true",
 		fmt.Sprintf("traefik.http.routers.%s.rule", router):                      rule,
 		fmt.Sprintf("traefik.http.routers.%s.entrypoints", router):               entrypoint,
-		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", router): fmt.Sprintf("%d", defaultPort),
+		fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port", router): fmt.Sprintf("%d", port),
 	}
 	if mode.IsServer() {
 		labels[fmt.Sprintf("traefik.http.routers.%s.tls", router)] = "true"
