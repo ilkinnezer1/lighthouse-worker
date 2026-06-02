@@ -150,6 +150,7 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment) error {
 	if err != nil {
 		return fmt.Errorf("parse compose: %w", err)
 	}
+	compose.StripFixedNames(project)
 
 	web := parseBuildOverrides(dep.BuildConfig).Web
 	if web != "" {

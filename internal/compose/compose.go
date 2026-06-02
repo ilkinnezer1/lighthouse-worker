@@ -87,6 +87,30 @@ func AttachExternalNetwork(project *types.Project, serviceName, networkName stri
 	return nil
 }
 
+// StripFixedNames clears user-pinned global names (container_name, network/volume
+// name:) so the per-deployment project namespace isolates them instead of
+// colliding across deploys. External networks/volumes are left alone.
+func StripFixedNames(project *types.Project) {
+	for name, svc := range project.Services {
+		svc.ContainerName = ""
+		project.Services[name] = svc
+	}
+	for name, net := range project.Networks {
+		if net.External {
+			continue
+		}
+		net.Name = ""
+		project.Networks[name] = net
+	}
+	for name, vol := range project.Volumes {
+		if vol.External {
+			continue
+		}
+		vol.Name = ""
+		project.Volumes[name] = vol
+	}
+}
+
 // Write serializes the project as YAML and writes it to path (0644).
 func Write(project *types.Project, path string) error {
 	data, err := project.MarshalYAML()
