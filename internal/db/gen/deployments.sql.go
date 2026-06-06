@@ -262,6 +262,31 @@ func (q *Queries) TransitionDeploymentStatus(ctx context.Context, arg Transition
 	return err
 }
 
+const updateDeploymentCommit = `-- name: UpdateDeploymentCommit :exec
+UPDATE deployments
+SET commit_sha     = $2,
+    commit_message = $3,
+    commit_author  = $4
+WHERE id = $1
+`
+
+type UpdateDeploymentCommitParams struct {
+	ID            pgtype.UUID
+	CommitSha     *string
+	CommitMessage *string
+	CommitAuthor  *string
+}
+
+func (q *Queries) UpdateDeploymentCommit(ctx context.Context, arg UpdateDeploymentCommitParams) error {
+	_, err := q.db.Exec(ctx, updateDeploymentCommit,
+		arg.ID,
+		arg.CommitSha,
+		arg.CommitMessage,
+		arg.CommitAuthor,
+	)
+	return err
+}
+
 const updateHeartbeat = `-- name: UpdateHeartbeat :exec
 UPDATE deployments
 SET last_heartbeat_at = now()

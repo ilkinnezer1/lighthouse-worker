@@ -79,3 +79,10 @@ UPDATE environments
 SET active     = false,
     updated_at = now()
 WHERE id = $1;
+
+-- name: UpdateDeploymentCommit :exec
+UPDATE deployments
+SET commit_sha     = $2,
+    commit_message = $3,
+    commit_author  = $4
+WHERE id = $1;

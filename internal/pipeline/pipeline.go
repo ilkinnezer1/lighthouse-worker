@@ -90,6 +90,7 @@ func (p *Pipeline) runStage(parent, work context.Context, dep *Deployment, s Sta
 			}); err != nil {
 				return fmt.Errorf("mark stage succeeded: %w", err)
 			}
+			p.persistCommit(parent, dep)
 			log.Info("stage completed")
 			return nil
 		}
@@ -112,6 +113,26 @@ func (p *Pipeline) runStage(parent, work context.Context, dep *Deployment, s Sta
 			log.Warn("retry rollback failed", slog.Any("err", rbErr))
 		}
 	}
+}
+
+// persistCommit writes the captured commit metadata once, after the stage that
+// produced it (clone) succeeds. dep.Commit is cleared so later stages skip it.
+// Best-effort: a write failure logs but never fails the deploy.
+func (p *Pipeline) persistCommit(ctx context.Context, dep *Deployment) {
+	if dep.Commit == nil {
+		return
+	}
+	err := p.q.UpdateDeploymentCommit(ctx, dbgen.UpdateDeploymentCommitParams{
+		ID:            db.MustUUID(dep.ID),
+		CommitSha:     &dep.Commit.Sha,
+		CommitMessage: &dep.Commit.Message,
+		CommitAuthor:  &dep.Commit.Author,
+	})
+	if err != nil {
+		p.log.Warn("persist commit failed", slog.Any("err", err))
+		return
+	}
+	dep.Commit = nil
 }
 
 func (p *Pipeline) rollbackPreceding(ctx context.Context, dep *Deployment, failedIdx int) {
