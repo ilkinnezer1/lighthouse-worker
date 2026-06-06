@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/docker/api/types/container"
@@ -46,7 +47,7 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		compose.InjectEnv(project, envs)
 	}
 
-	if err := r.ensureNetwork(ctx); err != nil {
+	if err := r.ensureNetwork(ctx, publicNetwork); err != nil {
 		return err
 	}
 
@@ -69,7 +70,39 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 	if err := r.recordComposeServices(ctx, dep, project, web); err != nil {
 		return err
 	}
+	if err := r.connectEnvNetwork(ctx, dep, web); err != nil {
+		return err
+	}
 	return nil
+}
+
+// connectEnvNetwork joins the deployment's non-web service containers to the
+// per-environment network so they can resolve managed databases (db-<id>) by
+// name. The web/Traefik service is left untouched to avoid Traefik re-resolving
+// its backend to the wrong network IP.
+func (r *Run) connectEnvNetwork(ctx context.Context, dep *pipeline.Deployment, web string) error {
+	envNet := envNetwork(dep.EnvironmentID)
+	if err := r.ensureNetwork(ctx, envNet); err != nil {
+		return err
+	}
+	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(dep.ID)))
+	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
+	if err != nil {
+		return fmt.Errorf("list compose containers: %w", err)
+	}
+	for _, c := range containers {
+		if c.Labels["com.docker.compose.service"] == web {
+			continue
+		}
+		if err := r.docker.NetworkConnect(ctx, envNet, c.ID, nil); err != nil && !isAlreadyInNetwork(err) {
+			return fmt.Errorf("connect %s to %s: %w", c.ID[:12], envNet, err)
+		}
+	}
+	return nil
+}
+
+func isAlreadyInNetwork(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already exists in network")
 }
 
 // resolveWeb picks the public-facing compose service and its port. An explicit

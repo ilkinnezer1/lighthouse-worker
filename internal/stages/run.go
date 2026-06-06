@@ -135,14 +135,21 @@ func (r *Run) databaseEnvs(ctx context.Context, dep *pipeline.Deployment) (map[s
 	return env, nil
 }
 
-func (r *Run) ensureNetwork(ctx context.Context) error {
-	_, err := r.docker.NetworkCreate(ctx, publicNetwork, network.CreateOptions{
+func (r *Run) ensureNetwork(ctx context.Context, name string) error {
+	_, err := r.docker.NetworkCreate(ctx, name, network.CreateOptions{
 		Driver: "bridge",
 	})
 	if err == nil || isAlreadyExists(err) {
 		return nil
 	}
-	return fmt.Errorf("create network: %w", err)
+	return fmt.Errorf("create network %s: %w", name, err)
+}
+
+// envNetwork is the per-environment network shared by a deployment's containers
+// and any managed databases in the same environment (so the app can resolve
+// db-<id> by name). Must match the network the database package provisions onto.
+func envNetwork(environmentID string) string {
+	return "env-" + environmentID
 }
 
 func (r *Run) logLine(ctx context.Context, deploymentID, line string) {

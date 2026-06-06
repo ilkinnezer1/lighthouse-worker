@@ -13,7 +13,10 @@ import (
 )
 
 func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o buildOverrides) error {
-	if err := r.ensureNetwork(ctx); err != nil {
+	if err := r.ensureNetwork(ctx, publicNetwork); err != nil {
+		return err
+	}
+	if err := r.ensureNetwork(ctx, envNetwork(dep.EnvironmentID)); err != nil {
 		return err
 	}
 
@@ -48,7 +51,8 @@ func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs
 	}
 	netCfg := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{
-			publicNetwork: {},
+			publicNetwork:                 {},
+			envNetwork(dep.EnvironmentID): {},
 		},
 	}
 
