@@ -3,19 +3,12 @@ package database
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
@@ -23,23 +16,19 @@ import (
 )
 
 const (
-	postgresUser  = "lighthouse"
-	postgresPort  = 5432
-	readyTimeout  = 60 * time.Second
-	readyInterval = time.Second
+	postgresUser         = "lighthouse"
+	postgresPort         = 5432
+	postgresReadyTimeout = 60 * time.Second
 )
 
 func (r *Router) provisionPostgres(ctx context.Context, row dbgen.GetDatabaseRow, log *slog.Logger) (host string, port int32, connStr string, err error) {
-	envID := db.UUIDString(row.EnvironmentID)
-	networkName := "env-" + envID
+	networkName := "env-" + db.UUIDString(row.EnvironmentID)
 	if err := r.ensureNetwork(ctx, networkName); err != nil {
 		return "", 0, "", err
 	}
 
 	name := containerName(db.UUIDString(row.ID))
-	volumeName := name + "-data"
 	imageRef := "postgres:" + row.Version
-
 	if err := r.ensureImage(ctx, imageRef, log); err != nil {
 		return "", 0, "", fmt.Errorf("pull image: %w", err)
 	}
@@ -49,13 +38,27 @@ func (r *Router) provisionPostgres(ctx context.Context, row dbgen.GetDatabaseRow
 		return "", 0, "", fmt.Errorf("generate password: %w", err)
 	}
 
-	cid, err := r.startContainer(ctx, name, volumeName, networkName, imageRef, row.Name, pass)
+	cid, err := r.startEngineContainer(ctx, containerSpec{
+		name:        name,
+		image:       imageRef,
+		networkName: networkName,
+		env: []string{
+			"POSTGRES_USER=" + postgresUser,
+			"POSTGRES_PASSWORD=" + pass,
+			"POSTGRES_DB=" + row.Name,
+		},
+		volumeName:  name + "-data",
+		mountTarget: "/var/lib/postgresql/data",
+	})
 	if err != nil {
 		return "", 0, "", err
 	}
 	log.Info("container started", slog.String("containerId", cid[:12]))
 
-	if err := r.waitReady(ctx, cid); err != nil {
+	ready := func(c context.Context) bool {
+		return r.execOK(c, cid, []string{"pg_isready", "-U", postgresUser})
+	}
+	if err := r.waitUntilReady(ctx, "pg_isready", postgresReadyTimeout, ready); err != nil {
 		return "", 0, "", fmt.Errorf("wait for ready: %w", err)
 	}
 
@@ -74,124 +77,6 @@ func (r *Router) provisionPostgres(ctx context.Context, row dbgen.GetDatabaseRow
 	}
 
 	return host, port, connStr, nil
-}
-
-func (r *Router) ensureImage(ctx context.Context, ref string, log *slog.Logger) error {
-	log.Info("ensuring image", slog.String("image", ref))
-	rc, err := r.docker.ImagePull(ctx, ref, image.PullOptions{})
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-	if _, err := io.Copy(io.Discard, rc); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (r *Router) startContainer(ctx context.Context, name, volumeName, networkName, image, dbName, pass string) (string, error) {
-	cfg := &container.Config{
-		Image: image,
-		Env: []string{
-			"POSTGRES_USER=" + postgresUser,
-			"POSTGRES_PASSWORD=" + pass,
-			"POSTGRES_DB=" + dbName,
-		},
-	}
-	hostCfg := &container.HostConfig{
-		Mounts: []mount.Mount{{
-			Type:   mount.TypeVolume,
-			Source: volumeName,
-			Target: "/var/lib/postgresql/data",
-		}},
-		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
-	}
-	netCfg := &network.NetworkingConfig{
-		EndpointsConfig: map[string]*network.EndpointSettings{networkName: {}},
-	}
-
-	created, err := r.docker.ContainerCreate(ctx, cfg, hostCfg, netCfg, nil, name)
-	if err != nil {
-		if !isAlreadyExists(err) {
-			return "", fmt.Errorf("container create: %w", err)
-		}
-		inspect, ierr := r.docker.ContainerInspect(ctx, name)
-		if ierr != nil {
-			return "", fmt.Errorf("inspect existing container: %w", ierr)
-		}
-		created.ID = inspect.ID
-	}
-	if err := r.docker.ContainerStart(ctx, created.ID, container.StartOptions{}); err != nil && !isAlreadyStarted(err) {
-		return "", fmt.Errorf("container start: %w", err)
-	}
-	return created.ID, nil
-}
-
-func (r *Router) waitReady(ctx context.Context, containerID string) error {
-	deadline := time.Now().Add(readyTimeout)
-	for time.Now().Before(deadline) {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		ok, _ := r.pgIsReady(ctx, containerID)
-		if ok {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(readyInterval):
-		}
-	}
-	return fmt.Errorf("pg_isready timed out after %s", readyTimeout)
-}
-
-func (r *Router) pgIsReady(ctx context.Context, containerID string) (bool, error) {
-	exec, err := r.docker.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Cmd: []string{"pg_isready", "-U", postgresUser},
-	})
-	if err != nil {
-		return false, err
-	}
-	if err := r.docker.ContainerExecStart(ctx, exec.ID, container.ExecStartOptions{}); err != nil {
-		return false, err
-	}
-	for i := 0; i < 10; i++ {
-		info, err := r.docker.ContainerExecInspect(ctx, exec.ID)
-		if err != nil {
-			return false, err
-		}
-		if !info.Running {
-			return info.ExitCode == 0, nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	return false, nil
-}
-
-func randomPassword() (string, error) {
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return strings.TrimRight(base64.URLEncoding.EncodeToString(b), "="), nil
-}
-
-func isAlreadyExists(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errdefs.IsConflict(err) {
-		return true
-	}
-	return strings.Contains(err.Error(), "already in use")
-}
-
-func isAlreadyStarted(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(err.Error(), "is already started")
 }
 
 func (r *Router) pgDump(ctx context.Context, containerName, dbName string) (*bytes.Buffer, error) {

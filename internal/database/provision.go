@@ -28,11 +28,23 @@ func (r *Router) provision(ctx context.Context, databaseID string) error {
 		log.Info("ownsContainer=false (attach-existing), skipping provision")
 		return nil
 	}
-	if row.Type != dbgen.DatabaseTypePOSTGRES {
-		return r.markProvisionFailed(ctx, id, databaseID, fmt.Errorf("only POSTGRES is supported, got %s", row.Type))
+	var (
+		host    string
+		port    int32
+		connStr string
+	)
+	switch row.Type {
+	case dbgen.DatabaseTypePOSTGRES:
+		host, port, connStr, err = r.provisionPostgres(ctx, row, log)
+	case dbgen.DatabaseTypeMYSQL:
+		host, port, connStr, err = r.provisionMysql(ctx, row, log)
+	case dbgen.DatabaseTypeREDIS:
+		host, port, connStr, err = r.provisionRedis(ctx, row, log)
+	case dbgen.DatabaseTypeMONGO:
+		host, port, connStr, err = r.provisionMongo(ctx, row, log)
+	default:
+		return r.markProvisionFailed(ctx, id, databaseID, fmt.Errorf("unsupported database type %s", row.Type))
 	}
-
-	host, port, connStr, err := r.provisionPostgres(ctx, row, log)
 	if err != nil {
 		return r.markProvisionFailed(ctx, id, databaseID, err)
 	}
