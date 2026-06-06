@@ -16,6 +16,13 @@ FROM services s
          JOIN deployments d ON d.id = s.deployment_id
 WHERE d.environment_id = $1;
 
+-- name: GetWebServiceByDeployment :one
+SELECT container_id, port
+FROM services
+WHERE deployment_id = $1
+  AND is_web = true
+LIMIT 1;
+
 -- name: MarkServiceTornDown :exec
 UPDATE services
 SET status       = 'torn_down',

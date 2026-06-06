@@ -21,6 +21,26 @@ func (q *Queries) DeleteServicesByDeployment(ctx context.Context, deploymentID p
 	return err
 }
 
+const getWebServiceByDeployment = `-- name: GetWebServiceByDeployment :one
+SELECT container_id, port
+FROM services
+WHERE deployment_id = $1
+  AND is_web = true
+LIMIT 1
+`
+
+type GetWebServiceByDeploymentRow struct {
+	ContainerID *string
+	Port        *int32
+}
+
+func (q *Queries) GetWebServiceByDeployment(ctx context.Context, deploymentID pgtype.UUID) (GetWebServiceByDeploymentRow, error) {
+	row := q.db.QueryRow(ctx, getWebServiceByDeployment, deploymentID)
+	var i GetWebServiceByDeploymentRow
+	err := row.Scan(&i.ContainerID, &i.Port)
+	return i, err
+}
+
 const insertService = `-- name: InsertService :exec
 INSERT INTO services (deployment_id, name, image, container_id, host, port, is_web, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

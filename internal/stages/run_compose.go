@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	composetypes "github.com/compose-spec/compose-go/v2/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/compose"
@@ -45,7 +47,7 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		compose.InjectEnv(project, envs)
 	}
 
-	if err := r.ensureNetwork(ctx); err != nil {
+	if err := r.ensureNetwork(ctx, publicNetwork); err != nil {
 		return err
 	}
 
@@ -68,8 +70,39 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 	if err := r.recordComposeServices(ctx, dep, project, web); err != nil {
 		return err
 	}
-	r.supersedePrevious(ctx, dep)
+	if err := r.connectEnvNetwork(ctx, dep, web); err != nil {
+		return err
+	}
 	return nil
+}
+
+// connectEnvNetwork joins the deployment's non-web service containers to the
+// per-environment network so they can resolve managed databases (db-<id>) by
+// name. The web/Traefik service is left untouched to avoid Traefik re-resolving
+// its backend to the wrong network IP.
+func (r *Run) connectEnvNetwork(ctx context.Context, dep *pipeline.Deployment, web string) error {
+	envNet := envNetwork(dep.EnvironmentID)
+	if err := r.ensureNetwork(ctx, envNet); err != nil {
+		return err
+	}
+	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(dep.ID)))
+	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
+	if err != nil {
+		return fmt.Errorf("list compose containers: %w", err)
+	}
+	for _, c := range containers {
+		if c.Labels["com.docker.compose.service"] == web {
+			continue
+		}
+		if err := r.docker.NetworkConnect(ctx, envNet, c.ID, nil); err != nil && !isAlreadyInNetwork(err) {
+			return fmt.Errorf("connect %s to %s: %w", c.ID[:12], envNet, err)
+		}
+	}
+	return nil
+}
+
+func isAlreadyInNetwork(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already exists in network")
 }
 
 // resolveWeb picks the public-facing compose service and its port. An explicit
@@ -96,7 +129,7 @@ func resolveWeb(project *composetypes.Project, o buildOverrides) (web string, po
 }
 
 func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) error {
-	if err := r.removeComposeResources(ctx, dep.ID); err != nil {
+	if err := removeComposeResources(ctx, r.docker, dep.ID); err != nil {
 		return err
 	}
 	if err := r.q.DeleteServicesByDeployment(ctx, db.MustUUID(dep.ID)); err != nil {
@@ -105,23 +138,26 @@ func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) err
 	return nil
 }
 
-func (r *Run) removeComposeResources(ctx context.Context, deploymentID string) error {
+// removeComposeResources force-removes the containers and networks of a compose
+// deployment, matched by its compose project label. Shared by the run stage's
+// rollback and the retire stage's supersede.
+func removeComposeResources(ctx context.Context, docker *client.Client, deploymentID string) error {
 	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(deploymentID)))
-	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
+	containers, err := docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
 	if err != nil {
 		return fmt.Errorf("list compose containers: %w", err)
 	}
 	for _, c := range containers {
-		if err := r.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
 			return fmt.Errorf("container remove %s: %w", c.ID[:12], err)
 		}
 	}
-	nets, err := r.docker.NetworkList(ctx, network.ListOptions{Filters: args})
+	nets, err := docker.NetworkList(ctx, network.ListOptions{Filters: args})
 	if err != nil {
 		return fmt.Errorf("list compose networks: %w", err)
 	}
 	for _, n := range nets {
-		if err := r.docker.NetworkRemove(ctx, n.ID); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.NetworkRemove(ctx, n.ID); err != nil && !errdefs.IsNotFound(err) {
 			return fmt.Errorf("network remove %s: %w", n.Name, err)
 		}
 	}
