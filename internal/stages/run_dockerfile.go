@@ -33,7 +33,6 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o bui
 	if err := r.recordService(ctx, dep, containerID, port); err != nil {
 		return err
 	}
-	r.supersedePrevious(ctx, dep)
 	return nil
 }
 

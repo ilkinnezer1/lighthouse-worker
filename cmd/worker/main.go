@@ -88,6 +88,8 @@ func main() {
 		stages.NewClone(logs),
 		stages.NewBuild(logs),
 		stages.NewRun(docker, logs, q, cipher, mode),
+		stages.NewHealthCheck(docker, q, logs),
+		stages.NewRetire(docker, q, logs),
 	}
 	cancelListener := cancelbus.New(rdb, root)
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)

@@ -10,6 +10,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/compose"
@@ -68,7 +69,6 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 	if err := r.recordComposeServices(ctx, dep, project, web); err != nil {
 		return err
 	}
-	r.supersedePrevious(ctx, dep)
 	return nil
 }
 
@@ -96,7 +96,7 @@ func resolveWeb(project *composetypes.Project, o buildOverrides) (web string, po
 }
 
 func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) error {
-	if err := r.removeComposeResources(ctx, dep.ID); err != nil {
+	if err := removeComposeResources(ctx, r.docker, dep.ID); err != nil {
 		return err
 	}
 	if err := r.q.DeleteServicesByDeployment(ctx, db.MustUUID(dep.ID)); err != nil {
@@ -105,23 +105,26 @@ func (r *Run) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) err
 	return nil
 }
 
-func (r *Run) removeComposeResources(ctx context.Context, deploymentID string) error {
+// removeComposeResources force-removes the containers and networks of a compose
+// deployment, matched by its compose project label. Shared by the run stage's
+// rollback and the retire stage's supersede.
+func removeComposeResources(ctx context.Context, docker *client.Client, deploymentID string) error {
 	args := filters.NewArgs(filters.Arg("label", "com.docker.compose.project="+composeProject(deploymentID)))
-	containers, err := r.docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
+	containers, err := docker.ContainerList(ctx, container.ListOptions{Filters: args, All: true})
 	if err != nil {
 		return fmt.Errorf("list compose containers: %w", err)
 	}
 	for _, c := range containers {
-		if err := r.docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.ContainerRemove(ctx, c.ID, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
 			return fmt.Errorf("container remove %s: %w", c.ID[:12], err)
 		}
 	}
-	nets, err := r.docker.NetworkList(ctx, network.ListOptions{Filters: args})
+	nets, err := docker.NetworkList(ctx, network.ListOptions{Filters: args})
 	if err != nil {
 		return fmt.Errorf("list compose networks: %w", err)
 	}
 	for _, n := range nets {
-		if err := r.docker.NetworkRemove(ctx, n.ID); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.NetworkRemove(ctx, n.ID); err != nil && !errdefs.IsNotFound(err) {
 			return fmt.Errorf("network remove %s: %w", n.Name, err)
 		}
 	}

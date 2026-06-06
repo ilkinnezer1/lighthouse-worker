@@ -135,40 +135,6 @@ func (r *Run) databaseEnvs(ctx context.Context, dep *pipeline.Deployment) (map[s
 	return env, nil
 }
 
-// supersedePrevious tears down older deployments of the same environment once the
-// new one is up. Best-effort: it must never roll back the deploy that succeeded.
-func (r *Run) supersedePrevious(ctx context.Context, dep *pipeline.Deployment) {
-	envID, err := db.ParseUUID(dep.EnvironmentID)
-	if err != nil {
-		r.logLine(ctx, dep.ID, "supersede: bad environment id: "+err.Error())
-		return
-	}
-	prior, err := r.q.ListDeploymentIDsByEnvironment(ctx, envID)
-	if err != nil {
-		r.logLine(ctx, dep.ID, "supersede: list deployments: "+err.Error())
-		return
-	}
-	for _, d := range prior {
-		oldID := db.UUIDString(d.ID)
-		if oldID == dep.ID {
-			continue
-		}
-		r.removeDeployment(ctx, dep.ID, oldID)
-	}
-}
-
-// removeDeployment force-removes a deployment's containers and networks, covering
-// both strategies: compose resources by project label, plus the Dockerfile
-// single container named deploy-<id>. Best-effort — errors are ignored.
-func (r *Run) removeDeployment(ctx context.Context, curID, oldID string) {
-	_ = r.removeComposeResources(ctx, oldID)
-	_ = r.docker.ContainerRemove(ctx, containerName(oldID), container.RemoveOptions{Force: true})
-	if id, err := db.ParseUUID(oldID); err == nil {
-		_ = r.q.DeleteServicesByDeployment(ctx, id)
-	}
-	r.logLine(ctx, curID, "superseded previous deployment "+oldID)
-}
-
 func (r *Run) ensureNetwork(ctx context.Context) error {
 	_, err := r.docker.NetworkCreate(ctx, publicNetwork, network.CreateOptions{
 		Driver: "bridge",
