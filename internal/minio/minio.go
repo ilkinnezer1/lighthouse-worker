@@ -71,12 +71,3 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 	}
 	return nil
 }
-
-// StatObject returns the size of an object in bytes.
-func (c *Client) StatObject(ctx context.Context, key string) (int64, error) {
-	info, err := c.mc.StatObject(ctx, c.bucket, key, minio.StatObjectOptions{})
-	if err != nil {
-		return 0, fmt.Errorf("stat object %q: %w", key, err)
-	}
-	return info.Size, nil
-}

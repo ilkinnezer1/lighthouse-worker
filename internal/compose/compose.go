@@ -12,7 +12,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var fileNames = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
+// FileNames are the recognized compose file names, in priority order.
+var FileNames = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
 
 // Parse loads the first compose file found in workDir and returns the resolved
 // project using the given project name. Errors if no compose file exists.
@@ -48,7 +49,7 @@ func dotEnv(workDir string) types.Mapping {
 }
 
 func findFile(workDir string) (string, error) {
-	for _, name := range fileNames {
+	for _, name := range FileNames {
 		path := filepath.Join(workDir, name)
 		if _, err := os.Stat(path); err == nil {
 			return path, nil

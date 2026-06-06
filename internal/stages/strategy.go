@@ -4,14 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/ilkinnezer1/lighthouse-worker/internal/compose"
 )
 
 const (
 	StrategyDockerfile = "dockerfile"
 	StrategyCompose    = "compose"
 )
-
-var composeFiles = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
 
 // detectStrategy honors a non-empty valid override; otherwise returns "compose"
 // if a compose file is present, "dockerfile" if a Dockerfile is present, or ""
@@ -21,7 +21,7 @@ func detectStrategy(workDir, override string) string {
 	case StrategyCompose, StrategyDockerfile:
 		return override
 	}
-	for _, name := range composeFiles {
+	for _, name := range compose.FileNames {
 		if _, err := os.Stat(filepath.Join(workDir, name)); err == nil {
 			return StrategyCompose
 		}
