@@ -20,6 +20,7 @@ type Deployment struct {
 	Branches          []Branch
 	Host              string
 	Scheme            string
+	Commit            *CommitInfo
 }
 
 func (d *Deployment) URL() string { return d.Scheme + "://" + d.Host }
@@ -28,6 +29,14 @@ type Branch struct {
 	Merge bool
 	Name  string
 	Sha   string
+}
+
+// CommitInfo is the worktree HEAD after clone/merge — the real built commit
+// (for merges, the merge commit Lighthouse just created).
+type CommitInfo struct {
+	Sha     string
+	Author  string
+	Message string
 }
 
 // Stage Run and Rollback must both be idempotent: redelivery, retry, and reverse-order cleanup all call them on partial state.

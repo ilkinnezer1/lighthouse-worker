@@ -34,9 +34,31 @@ func (*Clone) Name() string { return "clone" }
 
 func (c *Clone) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	if len(dep.Branches) > 0 {
-		return c.runMerge(ctx, dep)
+		if err := c.runMerge(ctx, dep); err != nil {
+			return err
+		}
+	} else if err := c.runPlain(ctx, dep); err != nil {
+		return err
 	}
-	return c.runPlain(ctx, dep)
+	c.captureCommit(ctx, dep)
+	return nil
+}
+
+// captureCommit records the worktree HEAD on dep so the runner can persist it.
+// For merges this is the merge commit Lighthouse just created. Best-effort: a
+// git failure logs to the deploy stream and never fails the deploy.
+func (c *Clone) captureCommit(ctx context.Context, dep *pipeline.Deployment) {
+	out, err := exec.CommandContext(ctx, "git", "-C", dep.WorkDir,
+		"log", "-1", "--format=%H%x1f%an%x1f%s").Output()
+	if err != nil {
+		_ = c.logs.WriteLine(ctx, dep.ID, "clone", "capture commit failed: "+err.Error())
+		return
+	}
+	parts := strings.SplitN(strings.TrimRight(string(out), "\n"), "\x1f", 3)
+	if len(parts) != 3 {
+		return
+	}
+	dep.Commit = &pipeline.CommitInfo{Sha: parts[0], Author: parts[1], Message: parts[2]}
 }
 
 // runPlain is the fast path for deploys without a pinned branch set: a shallow
