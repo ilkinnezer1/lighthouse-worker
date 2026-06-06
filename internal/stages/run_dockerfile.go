@@ -17,7 +17,7 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o bui
 		return err
 	}
 
-	envs, err := r.databaseEnvs(ctx, dep)
+	envs, err := r.deployEnvs(ctx, dep)
 	if err != nil {
 		return err
 	}

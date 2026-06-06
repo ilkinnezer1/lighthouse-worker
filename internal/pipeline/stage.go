@@ -21,6 +21,7 @@ type Deployment struct {
 	Host              string
 	Scheme            string
 	Commit            *CommitInfo
+	EnvVarsEnc        *string
 }
 
 func (d *Deployment) URL() string { return d.Scheme + "://" + d.Host }

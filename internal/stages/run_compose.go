@@ -37,7 +37,7 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		return fmt.Errorf("attach traefik network: %w", err)
 	}
 
-	envs, err := r.databaseEnvs(ctx, dep)
+	envs, err := r.deployEnvs(ctx, dep)
 	if err != nil {
 		return err
 	}

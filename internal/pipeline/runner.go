@@ -169,6 +169,7 @@ func buildDeployment(row dbgen.GetDeploymentForJobRow, deploymentID, workDirBase
 		WorkDir:           filepath.Join(workDirBase, deploymentID),
 		Host:              host,
 		Scheme:            scheme,
+		EnvVarsEnc:        row.EnvVarsEnc,
 	}
 }
 

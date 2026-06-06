@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -66,6 +67,42 @@ func (r *Run) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
 		return fmt.Errorf("delete services: %w", err)
 	}
 	return nil
+}
+
+// deployEnvs is the full env var set injected into deployment containers: the
+// environment's user-defined vars, with lighthouse-managed database creds
+// overlaid on top (a managed DATABASE_URL wins over any user-set value).
+func (r *Run) deployEnvs(ctx context.Context, dep *pipeline.Deployment) (map[string]string, error) {
+	env, err := r.userEnvs(dep)
+	if err != nil {
+		return nil, err
+	}
+	dbEnv, err := r.databaseEnvs(ctx, dep)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range dbEnv {
+		env[k] = v
+	}
+	return env, nil
+}
+
+// userEnvs decrypts the environment's env_vars_enc blob — an AES-256-GCM JSON
+// object { "KEY": "value", ... } in Nest's CryptoService layout — into a map.
+// Returns an empty (non-nil) map when unset.
+func (r *Run) userEnvs(dep *pipeline.Deployment) (map[string]string, error) {
+	out := map[string]string{}
+	if dep.EnvVarsEnc == nil || *dep.EnvVarsEnc == "" {
+		return out, nil
+	}
+	plain, err := r.cipher.Decrypt(*dep.EnvVarsEnc)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt env vars: %w", err)
+	}
+	if err := json.Unmarshal([]byte(plain), &out); err != nil {
+		return nil, fmt.Errorf("parse env vars: %w", err)
+	}
+	return out, nil
 }
 
 // databaseEnvs returns env vars to inject into deployment containers for any
