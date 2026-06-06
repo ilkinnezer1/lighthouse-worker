@@ -5,11 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -29,7 +26,7 @@ func (r *Router) snapshot(ctx context.Context, databaseID, snapshotID string) er
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("get database: %w", err))
 	}
 	if dbRow.Type != dbgen.DatabaseTypePOSTGRES {
-		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("only POSTGRES supported in 7a, got %s", dbRow.Type))
+		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("only POSTGRES is supported, got %s", dbRow.Type))
 	}
 	if dbRow.Status != dbgen.DatabaseStatusREADY {
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("database not READY (got %s)", dbRow.Status))
@@ -128,75 +125,6 @@ func (r *Router) snapshotDelete(ctx context.Context, snapshotID string) error {
 	}
 	if err := r.mc.DeleteObject(ctx, *snap.StorageKey); err != nil {
 		return fmt.Errorf("delete object: %w", err)
-	}
-	return nil
-}
-
-func (r *Router) pgDump(ctx context.Context, containerName, dbName string) (*bytes.Buffer, error) {
-	exec, err := r.docker.ContainerExecCreate(ctx, containerName, container.ExecOptions{
-		Cmd:          []string{"pg_dump", "--format=custom", "-U", postgresUser, dbName},
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("exec create: %w", err)
-	}
-	attach, err := r.docker.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("exec attach: %w", err)
-	}
-	defer attach.Close()
-
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, attach.Reader); err != nil {
-		return nil, fmt.Errorf("read exec output: %w", err)
-	}
-	info, err := r.docker.ContainerExecInspect(ctx, exec.ID)
-	if err != nil {
-		return nil, fmt.Errorf("exec inspect: %w", err)
-	}
-	if info.ExitCode != 0 {
-		return nil, fmt.Errorf("pg_dump exit %d: %s", info.ExitCode, stderr.String())
-	}
-	return &stdout, nil
-}
-
-func (r *Router) pgRestore(ctx context.Context, containerName, dbName string, src io.Reader) error {
-	exec, err := r.docker.ContainerExecCreate(ctx, containerName, container.ExecOptions{
-		Cmd:          []string{"pg_restore", "--clean", "--if-exists", "-U", postgresUser, "-d", dbName},
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-	})
-	if err != nil {
-		return fmt.Errorf("exec create: %w", err)
-	}
-	attach, err := r.docker.ContainerExecAttach(ctx, exec.ID, container.ExecStartOptions{})
-	if err != nil {
-		return fmt.Errorf("exec attach: %w", err)
-	}
-	defer attach.Close()
-
-	copyErrCh := make(chan error, 1)
-	go func() {
-		_, err := io.Copy(attach.Conn, src)
-		_ = attach.CloseWrite()
-		copyErrCh <- err
-	}()
-
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, attach.Reader); err != nil {
-		return fmt.Errorf("read exec output: %w", err)
-	}
-	if err := <-copyErrCh; err != nil {
-		return fmt.Errorf("stream snapshot to exec: %w", err)
-	}
-	info, err := r.docker.ContainerExecInspect(ctx, exec.ID)
-	if err != nil {
-		return fmt.Errorf("exec inspect: %w", err)
-	}
-	if info.ExitCode != 0 {
-		return fmt.Errorf("pg_restore exit %d: %s", info.ExitCode, stderr.String())
 	}
 	return nil
 }

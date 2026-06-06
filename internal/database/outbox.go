@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	eventProvisioned        = "database.provisioned"
-	eventProvisionFailed    = "database.provision_failed"
-	eventTeardownFailed     = "database.teardown_failed"
-	eventSnapshotReady      = "database.snapshot_ready"
-	eventSnapshotFailed     = "database.snapshot_failed"
-	eventSnapshotRestored   = "database.snapshot_restored"
+	eventProvisioned      = "database.provisioned"
+	eventProvisionFailed  = "database.provision_failed"
+	eventTeardownFailed   = "database.teardown_failed"
+	eventSnapshotReady    = "database.snapshot_ready"
+	eventSnapshotFailed   = "database.snapshot_failed"
+	eventSnapshotRestored = "database.snapshot_restored"
 )
 
 func (r *Router) emit(ctx context.Context, eventType, databaseID string, extras map[string]any) error {

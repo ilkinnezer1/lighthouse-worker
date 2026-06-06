@@ -143,12 +143,7 @@ func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
 			slog.Any("values", msg.Values),
 		)
 		// Re-delivering a malformed job won't help. Ack so it doesn't sit in PEL forever.
-		if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msg.ID).Err(); err != nil {
-			c.log.Error("ack malformed job failed",
-				slog.String("messageId", msg.ID),
-				slog.Any("err", err),
-			)
-		}
+		c.ack(ctx, msg.ID)
 		return
 	}
 
@@ -161,9 +156,7 @@ func (c *Consumer) dispatch(ctx context.Context, msg redis.XMessage) {
 		return
 	}
 
-	if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msg.ID).Err(); err != nil {
-		c.log.Error("ack failed", slog.String("messageId", msg.ID), slog.Any("err", err))
-	}
+	c.ack(ctx, msg.ID)
 }
 
 func (c *Consumer) dispatchFields(ctx context.Context, msg redis.XMessage) {
@@ -182,7 +175,14 @@ func (c *Consumer) dispatchFields(ctx context.Context, msg redis.XMessage) {
 		return
 	}
 
-	if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msg.ID).Err(); err != nil {
-		c.log.Error("ack failed", slog.String("messageId", msg.ID), slog.Any("err", err))
+	c.ack(ctx, msg.ID)
+}
+
+// ack confirms a message so Redis drops it from the pending-entries list.
+// Failures are logged, not returned: the work already succeeded, and the
+// message will simply be redelivered and no-op on the next pass.
+func (c *Consumer) ack(ctx context.Context, msgID string) {
+	if err := c.rdb.XAck(ctx, c.cfg.Stream, c.cfg.Group, msgID).Err(); err != nil {
+		c.log.Error("ack failed", slog.String("messageId", msgID), slog.Any("err", err))
 	}
 }
