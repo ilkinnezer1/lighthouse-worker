@@ -23,6 +23,13 @@ WHERE deployment_id = $1
   AND is_web = true
 LIMIT 1;
 
+-- name: GetServiceByDeploymentAndName :one
+SELECT container_id, port
+FROM services
+WHERE deployment_id = $1
+  AND name = $2
+LIMIT 1;
+
 -- name: MarkServiceTornDown :exec
 UPDATE services
 SET status       = 'torn_down',

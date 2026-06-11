@@ -95,7 +95,7 @@ func main() {
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
 	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
-	srv := httpx.New(cfg.HTTPAddr, root)
+	srv := httpx.New(cfg.HTTPAddr, root, docker, q)
 
 	buildConsumer := queue.New(rdb, root, queue.Config{
 		Stream:   "jobs:build",

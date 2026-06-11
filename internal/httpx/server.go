@@ -8,6 +8,9 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/docker/docker/client"
+
+	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
@@ -16,13 +19,16 @@ type Server struct {
 	log *slog.Logger
 }
 
-func New(addr string, log *slog.Logger) *Server {
+func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
+
+	mux.HandleFunc("GET /deployments/{id}/logs", runtimeLogs(docker, q, logger.Ctx(log, "RuntimeLogs")))
+	mux.HandleFunc("POST /deployments/{id}/services/{name}/{action}", serviceAction(docker, q, logger.Ctx(log, "ServiceAction")))
 
 	return &Server{
 		srv: &http.Server{
