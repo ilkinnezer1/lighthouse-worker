@@ -3,6 +3,7 @@ module github.com/ilkinnezer1/lighthouse-worker
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/compose-spec/compose-go/v2 v2.11.0
 	github.com/docker/docker v27.5.1+incompatible
 	github.com/jackc/pgx/v5 v5.9.2
