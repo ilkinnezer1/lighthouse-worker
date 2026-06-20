@@ -29,6 +29,7 @@ func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries)
 
 	mux.HandleFunc("GET /deployments/{id}/logs", runtimeLogs(docker, q, logger.Ctx(log, "RuntimeLogs")))
 	mux.HandleFunc("POST /deployments/{id}/services/{name}/{action}", serviceAction(docker, q, logger.Ctx(log, "ServiceAction")))
+	mux.HandleFunc("POST /deployments/{id}/services/{name}/run", maintenanceRun(docker, q, logger.Ctx(log, "MaintenanceRun")))
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/exec", containerExec(docker, q, logger.Ctx(log, "ContainerExec")))
 
 	return &Server{
