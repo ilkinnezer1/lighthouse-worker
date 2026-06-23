@@ -21,6 +21,7 @@ type Deployment struct {
 	Host              string
 	Scheme            string
 	Commit            *CommitInfo
+	Framework         string
 	EnvVarsEnc        *string
 }
 

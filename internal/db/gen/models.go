@@ -591,6 +591,7 @@ type Deployment struct {
 	CommitSha         *string
 	CommitMessage     *string
 	CommitAuthor      *string
+	Framework         *string
 	StartedAt         pgtype.Timestamptz
 	FinishedAt        pgtype.Timestamptz
 	LastHeartbeatAt   pgtype.Timestamptz
@@ -672,6 +673,15 @@ type ManagedDatabase struct {
 	RunMigrate         bool
 	SeedFromDatabaseID pgtype.UUID
 	SeedFromSnapshotID pgtype.UUID
+}
+
+type ManagedFile struct {
+	ID            pgtype.UUID
+	EnvironmentID pgtype.UUID
+	Path          string
+	ContentEnc    string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
 }
 
 type PrismaMigration struct {

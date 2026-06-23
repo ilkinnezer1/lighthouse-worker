@@ -86,3 +86,14 @@ SET commit_sha     = $2,
     commit_message = $3,
     commit_author  = $4
 WHERE id = $1;
+
+-- name: UpdateDeploymentFramework :exec
+UPDATE deployments
+SET framework = $2
+WHERE id = $1;
+
+-- name: ListManagedFilesByEnvironment :many
+SELECT path, content_enc
+FROM managed_files
+WHERE environment_id = $1
+ORDER BY path;

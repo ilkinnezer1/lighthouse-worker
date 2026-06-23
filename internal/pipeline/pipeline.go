@@ -91,6 +91,7 @@ func (p *Pipeline) runStage(parent, work context.Context, dep *Deployment, s Sta
 				return fmt.Errorf("mark stage succeeded: %w", err)
 			}
 			p.persistCommit(parent, dep)
+			p.persistFramework(parent, dep)
 			log.Info("stage completed")
 			return nil
 		}
@@ -133,6 +134,24 @@ func (p *Pipeline) persistCommit(ctx context.Context, dep *Deployment) {
 		return
 	}
 	dep.Commit = nil
+}
+
+// persistFramework writes the framework detected after clone. dep.Framework is
+// cleared so later stages skip the write. Best-effort: a failure logs but never
+// fails the deploy.
+func (p *Pipeline) persistFramework(ctx context.Context, dep *Deployment) {
+	if dep.Framework == "" {
+		return
+	}
+	err := p.q.UpdateDeploymentFramework(ctx, dbgen.UpdateDeploymentFrameworkParams{
+		ID:        db.MustUUID(dep.ID),
+		Framework: &dep.Framework,
+	})
+	if err != nil {
+		p.log.Warn("persist framework failed", slog.Any("err", err))
+		return
+	}
+	dep.Framework = ""
 }
 
 func (p *Pipeline) rollbackPreceding(ctx context.Context, dep *Deployment, failedIdx int) {

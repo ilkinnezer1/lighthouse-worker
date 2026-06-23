@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/framework"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
 )
@@ -41,6 +42,7 @@ func (c *Clone) Run(ctx context.Context, dep *pipeline.Deployment) error {
 		return err
 	}
 	c.captureCommit(ctx, dep)
+	dep.Framework = framework.Detect(dep.WorkDir)
 	return nil
 }
 

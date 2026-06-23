@@ -234,6 +234,38 @@ func (q *Queries) ListDeploymentIDsByEnvironment(ctx context.Context, environmen
 	return items, nil
 }
 
+const listManagedFilesByEnvironment = `-- name: ListManagedFilesByEnvironment :many
+SELECT path, content_enc
+FROM managed_files
+WHERE environment_id = $1
+ORDER BY path
+`
+
+type ListManagedFilesByEnvironmentRow struct {
+	Path       string
+	ContentEnc string
+}
+
+func (q *Queries) ListManagedFilesByEnvironment(ctx context.Context, environmentID pgtype.UUID) ([]ListManagedFilesByEnvironmentRow, error) {
+	rows, err := q.db.Query(ctx, listManagedFilesByEnvironment, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListManagedFilesByEnvironmentRow
+	for rows.Next() {
+		var i ListManagedFilesByEnvironmentRow
+		if err := rows.Scan(&i.Path, &i.ContentEnc); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const startDeployment = `-- name: StartDeployment :exec
 UPDATE deployments
 SET status     = 'CLONING',
@@ -284,6 +316,22 @@ func (q *Queries) UpdateDeploymentCommit(ctx context.Context, arg UpdateDeployme
 		arg.CommitMessage,
 		arg.CommitAuthor,
 	)
+	return err
+}
+
+const updateDeploymentFramework = `-- name: UpdateDeploymentFramework :exec
+UPDATE deployments
+SET framework = $2
+WHERE id = $1
+`
+
+type UpdateDeploymentFrameworkParams struct {
+	ID        pgtype.UUID
+	Framework *string
+}
+
+func (q *Queries) UpdateDeploymentFramework(ctx context.Context, arg UpdateDeploymentFrameworkParams) error {
+	_, err := q.db.Exec(ctx, updateDeploymentFramework, arg.ID, arg.Framework)
 	return err
 }
 

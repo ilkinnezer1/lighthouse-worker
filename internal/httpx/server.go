@@ -19,7 +19,7 @@ type Server struct {
 	log *slog.Logger
 }
 
-func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries) *Server {
+func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries, workDir string) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -33,6 +33,8 @@ func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries)
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/stats", serviceStats(docker, q, logger.Ctx(log, "ServiceStats")))
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/health", serviceHealth(docker, q, logger.Ctx(log, "ServiceHealth")))
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/exec", containerExec(docker, q, logger.Ctx(log, "ContainerExec")))
+	mux.HandleFunc("GET /deployments/{id}/files/tree", filesTree(workDir, logger.Ctx(log, "FilesTree")))
+	mux.HandleFunc("GET /deployments/{id}/files/content", filesContent(workDir, logger.Ctx(log, "FilesContent")))
 
 	return &Server{
 		srv: &http.Server{

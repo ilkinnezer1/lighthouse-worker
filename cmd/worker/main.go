@@ -86,6 +86,7 @@ func main() {
 	}
 	stageList := []pipeline.Stage{
 		stages.NewClone(logs),
+		stages.NewApplyFiles(q, cipher, logs),
 		stages.NewBuild(logs),
 		stages.NewRun(docker, logs, q, cipher, mode),
 		stages.NewHealthCheck(docker, q, logs),
@@ -95,7 +96,7 @@ func main() {
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
 	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
-	srv := httpx.New(cfg.HTTPAddr, root, docker, q)
+	srv := httpx.New(cfg.HTTPAddr, root, docker, q, cfg.WorkDir)
 
 	buildConsumer := queue.New(rdb, root, queue.Config{
 		Stream:   "jobs:build",

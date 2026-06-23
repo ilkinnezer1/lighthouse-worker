@@ -267,6 +267,7 @@ CREATE TABLE public.deployments (
     commit_sha text,
     commit_message text,
     commit_author text,
+    framework text,
     started_at timestamp(3) with time zone,
     finished_at timestamp(3) with time zone,
     last_heartbeat_at timestamp(3) with time zone,
@@ -365,6 +366,20 @@ CREATE TABLE public.managed_databases (
     run_migrate boolean DEFAULT false NOT NULL,
     seed_from_database_id uuid,
     seed_from_snapshot_id uuid
+);
+
+
+--
+-- Name: managed_files; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.managed_files (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    path text NOT NULL,
+    content_enc text NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
 );
 
 
@@ -537,6 +552,14 @@ ALTER TABLE ONLY public.managed_databases
 
 
 --
+-- Name: managed_files managed_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.managed_files
+    ADD CONSTRAINT managed_files_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -664,6 +687,13 @@ CREATE INDEX managed_databases_environment_id_idx ON public.managed_databases US
 --
 
 CREATE UNIQUE INDEX managed_databases_environment_id_name_key ON public.managed_databases USING btree (environment_id, name);
+
+
+--
+-- Name: managed_files_environment_id_path_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX managed_files_environment_id_path_key ON public.managed_files USING btree (environment_id, path);
 
 
 --
@@ -816,6 +846,14 @@ ALTER TABLE ONLY public.managed_databases
 
 ALTER TABLE ONLY public.managed_databases
     ADD CONSTRAINT managed_databases_seed_from_snapshot_id_fkey FOREIGN KEY (seed_from_snapshot_id) REFERENCES public.database_snapshots(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: managed_files managed_files_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.managed_files
+    ADD CONSTRAINT managed_files_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
