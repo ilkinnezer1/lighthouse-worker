@@ -91,11 +91,17 @@ func (r *Run) deployEnvs(ctx context.Context, dep *pipeline.Deployment) (map[str
 // object { "KEY": "value", ... } in Nest's CryptoService layout — into a map.
 // Returns an empty (non-nil) map when unset.
 func (r *Run) userEnvs(dep *pipeline.Deployment) (map[string]string, error) {
+	return decodeUserEnvs(r.cipher, dep.EnvVarsEnc)
+}
+
+// decodeUserEnvs decrypts and parses an env_vars_enc blob into a map. Returns an
+// empty (non-nil) map when the blob is unset.
+func decodeUserEnvs(cipher *crypto.Cipher, enc *string) (map[string]string, error) {
 	out := map[string]string{}
-	if dep.EnvVarsEnc == nil || *dep.EnvVarsEnc == "" {
+	if enc == nil || *enc == "" {
 		return out, nil
 	}
-	plain, err := r.cipher.Decrypt(*dep.EnvVarsEnc)
+	plain, err := cipher.Decrypt(*enc)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt env vars: %w", err)
 	}

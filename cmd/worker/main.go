@@ -87,6 +87,7 @@ func main() {
 	stageList := []pipeline.Stage{
 		stages.NewClone(logs),
 		stages.NewApplyFiles(q, cipher, logs),
+		stages.NewSetup(docker, logs, cipher),
 		stages.NewBuild(logs),
 		stages.NewRun(docker, logs, q, cipher, mode),
 		stages.NewHealthCheck(docker, q, logs),

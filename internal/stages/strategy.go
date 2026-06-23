@@ -33,9 +33,17 @@ func detectStrategy(workDir, override string) string {
 }
 
 type buildOverrides struct {
-	Strategy string `json:"strategy"`
-	Web      string `json:"web"`
-	Port     int    `json:"port"`
+	Strategy    string      `json:"strategy"`
+	Web         string      `json:"web"`
+	Port        int         `json:"port"`
+	ComposePath string      `json:"composePath"`
+	SetupSteps  []setupStep `json:"setupSteps"`
+}
+
+type setupStep struct {
+	Command string `json:"command"`
+	Image   string `json:"image"`
+	Docker  bool   `json:"docker"`
 }
 
 // parseBuildOverrides extracts the fields the worker reads from

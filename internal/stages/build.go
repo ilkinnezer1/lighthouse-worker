@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/compose"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
 )
@@ -32,7 +33,15 @@ func (b *Build) Run(ctx context.Context, dep *pipeline.Deployment) error {
 }
 
 func (b *Build) buildCompose(ctx context.Context, dep *pipeline.Deployment) error {
-	cmd := exec.CommandContext(ctx, "docker", "compose", "--project-name", composeProject(dep.ID), "build")
+	composeFile, err := compose.ResolvePath(parseBuildOverrides(dep.BuildConfig).ComposePath)
+	if err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "docker", "compose",
+		"-f", composeFile,
+		"--project-name", composeProject(dep.ID),
+		"build",
+	)
 	cmd.Dir = dep.WorkDir
 	if err := runCmd(ctx, cmd, b.logs, dep.ID, "build"); err != nil {
 		return fmt.Errorf("docker compose build: %w", err)

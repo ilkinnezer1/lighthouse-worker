@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	"github.com/compose-spec/compose-go/v2/types"
@@ -18,7 +19,13 @@ var FileNames = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "d
 // Parse loads the first compose file found in workDir and returns the resolved
 // project using the given project name. Errors if no compose file exists.
 func Parse(ctx context.Context, workDir, projectName string) (*types.Project, error) {
-	file, err := findFile(workDir)
+	return ParseAt(ctx, workDir, "", projectName)
+}
+
+// ParseAt loads the compose file at relPath (relative to workDir) and returns
+// the resolved project. An empty relPath falls back to default discovery.
+func ParseAt(ctx context.Context, workDir, relPath, projectName string) (*types.Project, error) {
+	file, err := resolveFile(workDir, relPath)
 	if err != nil {
 		return nil, err
 	}
@@ -37,6 +44,34 @@ func Parse(ctx context.Context, workDir, projectName string) (*types.Project, er
 		return nil, fmt.Errorf("load compose: %w", err)
 	}
 	return project, nil
+}
+
+// ResolvePath returns the cleaned compose path relative to workDir, defaulting
+// to "docker-compose.yml". It rejects any path that escapes workDir.
+func ResolvePath(relPath string) (string, error) {
+	if relPath == "" {
+		relPath = "docker-compose.yml"
+	}
+	clean := filepath.Clean(relPath)
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(os.PathSeparator)) {
+		return "", fmt.Errorf("compose path %q escapes workdir", relPath)
+	}
+	return clean, nil
+}
+
+func resolveFile(workDir, relPath string) (string, error) {
+	if relPath == "" {
+		return findFile(workDir)
+	}
+	clean, err := ResolvePath(relPath)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(workDir, clean)
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("compose file %s: %w", clean, err)
+	}
+	return path, nil
 }
 
 func dotEnv(workDir string) types.Mapping {

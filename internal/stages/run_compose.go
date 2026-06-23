@@ -21,7 +21,7 @@ import (
 )
 
 func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildOverrides) error {
-	project, err := compose.Parse(ctx, dep.WorkDir, composeProject(dep.ID))
+	project, err := compose.ParseAt(ctx, dep.WorkDir, o.ComposePath, composeProject(dep.ID))
 	if err != nil {
 		return fmt.Errorf("parse compose: %w", err)
 	}
