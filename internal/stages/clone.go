@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
+	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/framework"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
@@ -24,11 +27,30 @@ const (
 const mergeTimeout = 10 * time.Minute
 
 type Clone struct {
-	logs *logstream.Writer
+	q      *dbgen.Queries
+	cipher *crypto.Cipher
+	logs   *logstream.Writer
 }
 
-func NewClone(logs *logstream.Writer) *Clone {
-	return &Clone{logs: logs}
+func NewClone(q *dbgen.Queries, cipher *crypto.Cipher, logs *logstream.Writer) *Clone {
+	return &Clone{q: q, cipher: cipher, logs: logs}
+}
+
+// remoteFor resolves dep.RepoURL into the git remote to clone from, injecting
+// the owner's GitHub OAuth token for private github.com HTTPS repos. logSafe is
+// the token-masked form and is the ONLY remote representation that may be
+// logged. Missing token or any decrypt error falls back to the bare RepoURL so
+// public clones keep working.
+func (c *Clone) remoteFor(ctx context.Context, dep *pipeline.Deployment) (remote, logSafe string) {
+	enc, err := c.q.GetGithubTokenForOwner(ctx, db.MustUUID(dep.OwnerID))
+	if err != nil || enc == nil {
+		return dep.RepoURL, dep.RepoURL
+	}
+	token, err := c.cipher.Decrypt(*enc)
+	if err != nil {
+		return dep.RepoURL, dep.RepoURL
+	}
+	return authedRemote(dep.RepoURL, token)
 }
 
 func (*Clone) Name() string { return "clone" }
@@ -73,10 +95,13 @@ func (c *Clone) runPlain(ctx context.Context, dep *pipeline.Deployment) error {
 		return fmt.Errorf("mkdir parent: %w", err)
 	}
 
+	remote, logSafe := c.remoteFor(ctx, dep)
+	_ = c.logs.WriteLine(ctx, dep.ID, "clone", "cloning "+logSafe)
+
 	cmd := exec.CommandContext(ctx, "git", "clone",
 		"--depth", "1",
 		"--branch", dep.Branch,
-		dep.RepoURL,
+		remote,
 		dep.WorkDir,
 	)
 	if err := runCmd(ctx, cmd, c.logs, dep.ID, "clone"); err != nil {
@@ -97,10 +122,13 @@ func (c *Clone) runMerge(ctx context.Context, dep *pipeline.Deployment) error {
 		return fmt.Errorf("mkdir workdir: %w", err)
 	}
 
+	remote, logSafe := c.remoteFor(ctx, dep)
+	_ = c.logs.WriteLine(ctx, dep.ID, "clone", "cloning "+logSafe)
+
 	if err := c.git(ctx, dep, "init", "-q"); err != nil {
 		return fmt.Errorf("git init: %w", err)
 	}
-	if err := c.git(ctx, dep, "remote", "add", "origin", dep.RepoURL); err != nil {
+	if err := c.git(ctx, dep, "remote", "add", "origin", remote); err != nil {
 		return fmt.Errorf("git remote add: %w", err)
 	}
 

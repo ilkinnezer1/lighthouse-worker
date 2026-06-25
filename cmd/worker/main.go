@@ -85,7 +85,7 @@ func main() {
 		os.Exit(1)
 	}
 	stageList := []pipeline.Stage{
-		stages.NewClone(logs),
+		stages.NewClone(q, cipher, logs),
 		stages.NewApplyFiles(q, cipher, logs),
 		stages.NewSetup(docker, logs, cipher),
 		stages.NewBuild(logs),
