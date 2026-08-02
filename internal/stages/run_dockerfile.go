@@ -17,7 +17,7 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o bui
 	if err != nil {
 		return err
 	}
-	return r.runImage(ctx, dep, envs, resolvePort(o.Port), migrate)
+	return r.runImage(ctx, dep, o, envs, resolvePort(o.Port, defaultPort), migrate)
 }
 
 // runImage starts the single deploy container from a prebuilt image tagged
@@ -25,7 +25,7 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o bui
 // Shared by the dockerfile and nixpacks strategies (nixpacks produces the same
 // image tag), so both flow through one run/health/retire/rollback path. migrate
 // runs `artisan migrate` once the container is up (Laravel + SQL managed DB).
-func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, envs map[string]string, port int, migrate bool) error {
+func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, o buildOverrides, envs map[string]string, port int, migrate bool) error {
 	if err := r.ensureNetwork(ctx, publicNetwork); err != nil {
 		return err
 	}
@@ -33,7 +33,7 @@ func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, envs map[s
 		return err
 	}
 
-	containerID, err := r.startContainer(ctx, dep, envs, port)
+	containerID, err := r.startContainer(ctx, dep, o, envs, port)
 	if err != nil {
 		return err
 	}
@@ -48,7 +48,7 @@ func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, envs map[s
 	return nil
 }
 
-func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs map[string]string, port int) (string, error) {
+func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, o buildOverrides, envs map[string]string, port int) (string, error) {
 	name := containerName(dep.ID)
 	cfg := &container.Config{
 		Image:  ImageTag(dep.ID),
@@ -57,6 +57,7 @@ func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, envs
 	}
 	hostCfg := &container.HostConfig{
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
+		Resources:     resourceLimits(o),
 	}
 	netCfg := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{

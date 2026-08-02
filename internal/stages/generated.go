@@ -25,7 +25,7 @@ const generatedDockerfileName = "Dockerfile.lighthouse"
 // verbatim so the user can copy and customize it.
 func (b *Build) buildGenerated(ctx context.Context, dep *pipeline.Deployment) error {
 	o := parseBuildOverrides(dep.BuildConfig)
-	src := nixpacksSource(dep, o)
+	src := buildSource(dep, o)
 
 	content, port, err := dockerfilegen.Generate(src, framework.Detect(src), dockerfilegen.Options{
 		BuildCommand:   o.BuildCommand,
@@ -68,14 +68,7 @@ func (r *Run) runGenerated(ctx context.Context, dep *pipeline.Deployment, o buil
 	if err != nil {
 		return err
 	}
-	port := resolveGeneratedPort(o.Port)
+	port := resolvePort(o.Port, dockerfilegen.DefaultPort)
 	envs["PORT"] = strconv.Itoa(port)
-	return r.runImage(ctx, dep, envs, port, migrate)
-}
-
-func resolveGeneratedPort(override int) int {
-	if override != 0 {
-		return override
-	}
-	return dockerfilegen.DefaultPort
+	return r.runImage(ctx, dep, o, envs, port, migrate)
 }

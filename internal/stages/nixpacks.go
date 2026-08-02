@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 
@@ -14,9 +13,6 @@ import (
 
 const (
 	nixpacksBinary = "nixpacks"
-	// nixpacksDefaultPort is the port a nixpacks app is told to listen on (via
-	// $PORT) and that Traefik is routed to when buildConfig sets no explicit port.
-	nixpacksDefaultPort = 8080
 	// nixpacksBuildTimeout bounds a from-source build (toolchain install + compile)
 	// so a wedged nixpacks can't pin a worker slot until the reaper notices.
 	nixpacksBuildTimeout = 30 * time.Minute
@@ -51,29 +47,13 @@ func (r *Run) runNixpacks(ctx context.Context, dep *pipeline.Deployment, o build
 	if err != nil {
 		return err
 	}
-	port := resolveNixpacksPort(o.Port)
+	port := resolvePort(o.Port, sourceBuildDefaultPort)
 	envs["PORT"] = strconv.Itoa(port)
-	return r.runImage(ctx, dep, envs, port, migrate)
-}
-
-func resolveNixpacksPort(override int) int {
-	if override != 0 {
-		return override
-	}
-	return nixpacksDefaultPort
-}
-
-// nixpacksSource is the build context: the workdir, narrowed to a monorepo
-// subdirectory when buildConfig.rootDir is set.
-func nixpacksSource(dep *pipeline.Deployment, o buildOverrides) string {
-	if o.RootDir != "" {
-		return filepath.Join(dep.WorkDir, o.RootDir)
-	}
-	return dep.WorkDir
+	return r.runImage(ctx, dep, o, envs, port, migrate)
 }
 
 func nixpacksBuildArgs(dep *pipeline.Deployment, o buildOverrides) []string {
-	src := nixpacksSource(dep, o)
+	src := buildSource(dep, o)
 	args := []string{"build", src, "--name", ImageTag(dep.ID)}
 	if o.BuildCommand != "" {
 		args = append(args, "--build-cmd", o.BuildCommand)

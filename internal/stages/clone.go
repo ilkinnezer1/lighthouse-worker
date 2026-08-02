@@ -56,6 +56,12 @@ func (c *Clone) remoteFor(ctx context.Context, dep *pipeline.Deployment) (remote
 func (*Clone) Name() string { return "clone" }
 
 func (c *Clone) Run(ctx context.Context, dep *pipeline.Deployment) error {
+	// A prebuilt image has no source to fetch; the stage still completes so the
+	// Nest-seeded stage row reaches a terminal state.
+	if parseBuildOverrides(dep.BuildConfig).Strategy == StrategyImage {
+		_ = c.logs.WriteLine(ctx, dep.ID, "clone", "prebuilt image strategy — nothing to clone")
+		return nil
+	}
 	if len(dep.Branches) > 0 {
 		if err := c.runMerge(ctx, dep); err != nil {
 			return err

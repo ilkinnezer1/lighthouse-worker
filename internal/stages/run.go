@@ -54,6 +54,12 @@ func (r *Run) Run(ctx context.Context, dep *pipeline.Deployment) error {
 		return r.runNixpacks(ctx, dep, o)
 	case StrategyGenerated:
 		return r.runGenerated(ctx, dep, o)
+	case StrategyBuildpacks:
+		return r.runBuildpacks(ctx, dep, o)
+	case StrategyRailpack:
+		return r.runRailpack(ctx, dep, o)
+	case StrategyImage:
+		return r.runPrebuiltImage(ctx, dep, o)
 	default:
 		return fmt.Errorf("unknown build strategy for %s", dep.WorkDir)
 	}
@@ -92,7 +98,7 @@ func (r *Run) deployEnvs(ctx context.Context, dep *pipeline.Deployment, o buildO
 	for k, v := range dbURLEnvs(conns) {
 		env[k] = v
 	}
-	if framework.Detect(nixpacksSource(dep, o)) == frameworkLaravel {
+	if framework.Detect(buildSource(dep, o)) == frameworkLaravel {
 		migrate, err = r.applyLaravelEnvs(ctx, dep, env, conns)
 		if err != nil {
 			return nil, false, err
@@ -187,13 +193,6 @@ func envNetwork(environmentID string) string {
 
 func (r *Run) logLine(ctx context.Context, deploymentID, line string) {
 	_ = r.logs.WriteLine(ctx, deploymentID, "run", line)
-}
-
-func resolvePort(override int) int {
-	if override != 0 {
-		return override
-	}
-	return defaultPort
 }
 
 func traefikLabels(dep *pipeline.Deployment, mode routing.Mode, port int) map[string]string {

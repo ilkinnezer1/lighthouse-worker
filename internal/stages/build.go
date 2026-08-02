@@ -31,6 +31,12 @@ func (b *Build) Run(ctx context.Context, dep *pipeline.Deployment) error {
 		return b.buildNixpacks(ctx, dep)
 	case StrategyGenerated:
 		return b.buildGenerated(ctx, dep)
+	case StrategyBuildpacks:
+		return b.buildBuildpacks(ctx, dep)
+	case StrategyRailpack:
+		return b.buildRailpack(ctx, dep)
+	case StrategyImage:
+		return b.buildImage(ctx, dep)
 	default:
 		return fmt.Errorf("unknown build strategy for %s", dep.WorkDir)
 	}
