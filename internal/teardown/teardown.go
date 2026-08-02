@@ -12,13 +12,16 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/errdefs"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
 )
 
 const eventEnvironmentTornDown = "environment.torn_down"
@@ -95,6 +98,8 @@ func (r *Runner) Run(ctx context.Context, environmentID string) error {
 		r.removeWorkDir(log, db.UUIDString(d.ID))
 	}
 
+	r.removeVolumes(ctx, log, environmentID)
+
 	if err := r.q.DeactivateEnvironment(ctx, envUUID); err != nil {
 		return fmt.Errorf("deactivate environment: %w", err)
 	}
@@ -108,6 +113,31 @@ func (r *Runner) Run(ctx context.Context, environmentID string) error {
 		slog.Int("deployments", len(deployments)),
 	)
 	return nil
+}
+
+// removeVolumes deletes the environment's persistent volumes. Teardown destroys
+// the environment itself (a closed PR's preview env), so leaving them behind
+// would grow disk without bound. Each removal is logged by name, because this is
+// the one step that destroys user data rather than rebuildable artifacts.
+func (r *Runner) removeVolumes(ctx context.Context, log *slog.Logger, environmentID string) {
+	prefix := stages.EnvVolumePrefix(environmentID)
+	list, err := r.docker.VolumeList(ctx, volume.ListOptions{
+		Filters: filters.NewArgs(filters.Arg("name", prefix)),
+	})
+	if err != nil {
+		log.Error("list volumes failed", slog.Any("err", err))
+		return
+	}
+	for _, v := range list.Volumes {
+		if !strings.HasPrefix(v.Name, prefix) {
+			continue
+		}
+		if err := r.docker.VolumeRemove(ctx, v.Name, true); err != nil && !isNotFound(err) {
+			log.Error("remove volume failed", slog.String("volume", v.Name), slog.Any("err", err))
+			continue
+		}
+		log.Info("removed volume", slog.String("volume", v.Name))
+	}
 }
 
 func (r *Runner) removeContainer(ctx context.Context, log *slog.Logger, s dbgen.Service) {

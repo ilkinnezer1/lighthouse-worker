@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
@@ -33,7 +34,12 @@ func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, o buildOve
 		return err
 	}
 
-	containerID, err := r.startContainer(ctx, dep, o, envs, port)
+	mounts, err := r.ensureVolumes(ctx, dep, o)
+	if err != nil {
+		return err
+	}
+
+	containerID, err := r.startContainer(ctx, dep, o, envs, port, mounts)
 	if err != nil {
 		return err
 	}
@@ -48,7 +54,7 @@ func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, o buildOve
 	return nil
 }
 
-func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, o buildOverrides, envs map[string]string, port int) (string, error) {
+func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, o buildOverrides, envs map[string]string, port int, mounts []mount.Mount) (string, error) {
 	name := containerName(dep.ID)
 	cfg := &container.Config{
 		Image:  ImageTag(dep.ID),
@@ -58,6 +64,7 @@ func (r *Run) startContainer(ctx context.Context, dep *pipeline.Deployment, o bu
 	hostCfg := &container.HostConfig{
 		RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
 		Resources:     resourceLimits(o),
+		Mounts:        mounts,
 	}
 	netCfg := &network.NetworkingConfig{
 		EndpointsConfig: map[string]*network.EndpointSettings{

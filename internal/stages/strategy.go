@@ -70,6 +70,15 @@ type buildOverrides struct {
 	Image    string  `json:"image"`
 	CPULimit float64 `json:"cpuLimit"`
 	MemoryMB int64   `json:"memoryMb"`
+
+	Volumes []volumeMount `json:"volumes"`
+}
+
+// volumeMount is one persistent volume declared on buildConfig: Name is scoped
+// to the environment at create time, Path is the absolute mount target.
+type volumeMount struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // buildSource is the build context for the from-source strategies: the workdir,

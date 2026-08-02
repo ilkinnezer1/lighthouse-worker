@@ -24,6 +24,9 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 	if o.CPULimit > 0 || o.MemoryMB > 0 {
 		r.logLine(ctx, dep.ID, "note: cpuLimit/memoryMb are not applied to compose deploys — set deploy.resources.limits per service in your compose file")
 	}
+	if len(o.Volumes) > 0 {
+		r.logLine(ctx, dep.ID, "note: buildConfig volumes are not applied to compose deploys — declare volumes in your compose file instead")
+	}
 	project, err := compose.ParseAt(ctx, dep.WorkDir, o.ComposePath, composeProject(dep.ID))
 	if err != nil {
 		return fmt.Errorf("parse compose: %w", err)
