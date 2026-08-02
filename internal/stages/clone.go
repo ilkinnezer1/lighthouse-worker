@@ -37,12 +37,12 @@ func NewClone(q *dbgen.Queries, cipher *crypto.Cipher, logs *logstream.Writer) *
 }
 
 // remoteFor resolves dep.RepoURL into the git remote to clone from, injecting
-// the owner's GitHub OAuth token for private github.com HTTPS repos. logSafe is
-// the token-masked form and is the ONLY remote representation that may be
-// logged. Missing token or any decrypt error falls back to the bare RepoURL so
-// public clones keep working.
+// the triggering user's GitHub OAuth token for private github.com HTTPS repos.
+// logSafe is the token-masked form and is the ONLY remote representation that
+// may be logged. Missing token or any decrypt error falls back to the bare
+// RepoURL so public clones keep working.
 func (c *Clone) remoteFor(ctx context.Context, dep *pipeline.Deployment) (remote, logSafe string) {
-	enc, err := c.q.GetGithubTokenForOwner(ctx, db.MustUUID(dep.OwnerID))
+	enc, err := c.q.GetGithubTokenForUser(ctx, db.MustUUID(dep.TriggeredByUserID))
 	if err != nil || enc == nil {
 		return dep.RepoURL, dep.RepoURL
 	}

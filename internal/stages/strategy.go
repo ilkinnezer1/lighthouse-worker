@@ -11,14 +11,18 @@ import (
 const (
 	StrategyDockerfile = "dockerfile"
 	StrategyCompose    = "compose"
+	StrategyNixpacks   = "nixpacks"
+	StrategyGenerated  = "generated"
 )
 
 // detectStrategy honors a non-empty valid override; otherwise returns "compose"
-// if a compose file is present, "dockerfile" if a Dockerfile is present, or ""
-// if neither.
+// if a compose file is present, "dockerfile" if a Dockerfile is present, or
+// "generated" when neither is — a repo with no build recipe gets a
+// version-matched Dockerfile synthesized for it. Nixpacks is opt-in only (an
+// explicit override), because its frozen toolchain can't target legacy stacks.
 func detectStrategy(workDir, override string) string {
 	switch override {
-	case StrategyCompose, StrategyDockerfile:
+	case StrategyCompose, StrategyDockerfile, StrategyNixpacks, StrategyGenerated:
 		return override
 	}
 	for _, name := range compose.FileNames {
@@ -29,15 +33,23 @@ func detectStrategy(workDir, override string) string {
 	if _, err := os.Stat(filepath.Join(workDir, "Dockerfile")); err == nil {
 		return StrategyDockerfile
 	}
-	return ""
+	return StrategyGenerated
 }
 
+// buildOverrides mirrors the fields the worker reads from Project.buildConfig.
+// BuildCommand/StartCommand/RuntimeVersion/RootDir steer the from-source paths
+// (generated Dockerfile and nixpacks); empty values are no-ops there.
 type buildOverrides struct {
 	Strategy    string      `json:"strategy"`
 	Web         string      `json:"web"`
 	Port        int         `json:"port"`
 	ComposePath string      `json:"composePath"`
 	SetupSteps  []setupStep `json:"setupSteps"`
+
+	BuildCommand   string `json:"buildCommand"`
+	StartCommand   string `json:"startCommand"`
+	RuntimeVersion string `json:"runtimeVersion"`
+	RootDir        string `json:"rootDir"`
 }
 
 type setupStep struct {

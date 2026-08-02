@@ -39,7 +39,10 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		return fmt.Errorf("attach traefik network: %w", err)
 	}
 
-	envs, err := r.deployEnvs(ctx, dep)
+	// The compose web service is user-defined, so the auto-migrate step (which
+	// execs into a known single container) is limited to the image path; a
+	// Laravel compose deploy still gets DB_* / APP_KEY via deployEnvs.
+	envs, _, err := r.deployEnvs(ctx, dep, o)
 	if err != nil {
 		return err
 	}

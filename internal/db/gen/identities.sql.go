@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getGithubTokenForOwner = `-- name: GetGithubTokenForOwner :one
+const getGithubTokenForUser = `-- name: GetGithubTokenForUser :one
 SELECT access_token_enc
 FROM user_identities
 WHERE user_id = $1
@@ -21,8 +21,8 @@ ORDER BY updated_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetGithubTokenForOwner(ctx context.Context, userID pgtype.UUID) (*string, error) {
-	row := q.db.QueryRow(ctx, getGithubTokenForOwner, userID)
+func (q *Queries) GetGithubTokenForUser(ctx context.Context, userID pgtype.UUID) (*string, error) {
+	row := q.db.QueryRow(ctx, getGithubTokenForUser, userID)
 	var access_token_enc *string
 	err := row.Scan(&access_token_enc)
 	return access_token_enc, err

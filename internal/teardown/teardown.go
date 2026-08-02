@@ -153,7 +153,7 @@ func (r *Runner) emit(ctx context.Context, env dbgen.GetEnvironmentForTeardownRo
 	}
 	return r.q.InsertOutboxEvent(ctx, dbgen.InsertOutboxEventParams{
 		Type:    eventEnvironmentTornDown,
-		UserID:  env.OwnerID,
+		UserID:  env.CreatedByUserID,
 		Payload: body,
 	})
 }

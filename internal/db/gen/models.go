@@ -456,6 +456,118 @@ func (e IdentityProvider) Valid() bool {
 	return false
 }
 
+type OrgInvitationStatus string
+
+const (
+	OrgInvitationStatusPENDING  OrgInvitationStatus = "PENDING"
+	OrgInvitationStatusACCEPTED OrgInvitationStatus = "ACCEPTED"
+	OrgInvitationStatusDECLINED OrgInvitationStatus = "DECLINED"
+	OrgInvitationStatusREVOKED  OrgInvitationStatus = "REVOKED"
+	OrgInvitationStatusEXPIRED  OrgInvitationStatus = "EXPIRED"
+)
+
+func (e *OrgInvitationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OrgInvitationStatus(s)
+	case string:
+		*e = OrgInvitationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OrgInvitationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullOrgInvitationStatus struct {
+	OrgInvitationStatus OrgInvitationStatus
+	Valid               bool // Valid is true if OrgInvitationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOrgInvitationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.OrgInvitationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OrgInvitationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOrgInvitationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OrgInvitationStatus), nil
+}
+
+func (e OrgInvitationStatus) Valid() bool {
+	switch e {
+	case OrgInvitationStatusPENDING,
+		OrgInvitationStatusACCEPTED,
+		OrgInvitationStatusDECLINED,
+		OrgInvitationStatusREVOKED,
+		OrgInvitationStatusEXPIRED:
+		return true
+	}
+	return false
+}
+
+type OrgRole string
+
+const (
+	OrgRoleOWNER  OrgRole = "OWNER"
+	OrgRoleADMIN  OrgRole = "ADMIN"
+	OrgRoleMEMBER OrgRole = "MEMBER"
+	OrgRoleVIEWER OrgRole = "VIEWER"
+)
+
+func (e *OrgRole) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = OrgRole(s)
+	case string:
+		*e = OrgRole(s)
+	default:
+		return fmt.Errorf("unsupported scan type for OrgRole: %T", src)
+	}
+	return nil
+}
+
+type NullOrgRole struct {
+	OrgRole OrgRole
+	Valid   bool // Valid is true if OrgRole is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullOrgRole) Scan(value interface{}) error {
+	if value == nil {
+		ns.OrgRole, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.OrgRole.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullOrgRole) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.OrgRole), nil
+}
+
+func (e OrgRole) Valid() bool {
+	switch e {
+	case OrgRoleOWNER,
+		OrgRoleADMIN,
+		OrgRoleMEMBER,
+		OrgRoleVIEWER:
+		return true
+	}
+	return false
+}
+
 type SnapshotStatus string
 
 const (
@@ -591,13 +703,13 @@ type Deployment struct {
 	CommitSha         *string
 	CommitMessage     *string
 	CommitAuthor      *string
-	Framework         *string
 	StartedAt         pgtype.Timestamptz
 	FinishedAt        pgtype.Timestamptz
 	LastHeartbeatAt   pgtype.Timestamptz
-	CancelRequestedAt pgtype.Timestamptz
 	ErrorSummary      *string
 	CreatedAt         pgtype.Timestamptz
+	CancelRequestedAt pgtype.Timestamptz
+	Framework         *string
 }
 
 type DeploymentBranch struct {
@@ -634,6 +746,7 @@ type Environment struct {
 	Active       bool
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	PrNumber     *int32
 }
 
 type EventOutbox struct {
@@ -684,6 +797,36 @@ type ManagedFile struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type OrgInvitation struct {
+	ID              pgtype.UUID
+	OrgID           pgtype.UUID
+	Role            OrgRole
+	InvitedByUserID pgtype.UUID
+	InviteeUserID   pgtype.UUID
+	TokenHash       *string
+	Email           *string
+	Status          OrgInvitationStatus
+	ExpiresAt       pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+}
+
+type OrgMembership struct {
+	ID        pgtype.UUID
+	OrgID     pgtype.UUID
+	UserID    pgtype.UUID
+	Role      OrgRole
+	CreatedAt pgtype.Timestamptz
+}
+
+type Organization struct {
+	ID         pgtype.UUID
+	Name       string
+	Slug       string
+	IsPersonal bool
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
+}
+
 type PrismaMigration struct {
 	ID                string
 	Checksum          string
@@ -696,17 +839,20 @@ type PrismaMigration struct {
 }
 
 type Project struct {
-	ID            pgtype.UUID
-	OwnerID       pgtype.UUID
-	Name          string
-	Slug          string
-	Subdomain     string
-	RepoUrl       string
-	DefaultBranch string
-	BuildConfig   []byte
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	DeletedAt     pgtype.Timestamptz
+	ID                   pgtype.UUID
+	Name                 string
+	Slug                 string
+	Subdomain            string
+	RepoUrl              string
+	DefaultBranch        string
+	BuildConfig          []byte
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
+	DeletedAt            pgtype.Timestamptz
+	ProviderRepoFullName *string
+	WebhookSecretEnc     *string
+	OrganizationID       pgtype.UUID
+	CreatedByUserID      pgtype.UUID
 }
 
 type Service struct {
@@ -747,4 +893,13 @@ type UserIdentity struct {
 	Scopes          []string
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type WebhookDelivery struct {
+	ID         pgtype.UUID
+	Provider   string
+	DeliveryID string
+	EventType  string
+	ProjectID  pgtype.UUID
+	ReceivedAt pgtype.Timestamptz
 }
