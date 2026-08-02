@@ -137,10 +137,15 @@ func containerExec(docker *client.Client, q *dbgen.Queries, log *slog.Logger) ht
 		}
 		cancel()
 
-		// The shell has exited or a side disconnected; report the exit code on a
-		// fresh context since the session context is now cancelled.
-		wctx, wcancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// Close the attach before inspecting: Docker reports the exec Running
+		// until its streams close, so this reaps it immediately instead of
+		// waiting on the input goroutine's late Close. Double Close is harmless.
+		attach.Close()
+
+		// Poll for the exit code first, THEN take a fresh 2s write deadline so the
+		// poll can't burn the deadline and blow the exit-frame write.
 		code := execExitCode(docker, execID.ID)
+		wctx, wcancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_ = conn.Write(wctx, websocket.MessageText, execExitFrame(code))
 		wcancel()
 		_ = conn.Close(websocket.StatusNormalClosure, "session ended")
@@ -195,14 +200,25 @@ func execInitialSize(r *http.Request) (cols, rows uint) {
 
 // execExitCode inspects the finished exec; -1 means the code is unknown (e.g.
 // the inspect failed or the exec was still running when the client left).
+// Docker often hasn't reaped the exec the instant the pty hits EOF, so poll
+// until it's no longer Running before trusting ExitCode.
 func execExitCode(docker *client.Client, execID string) int {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	info, err := docker.ContainerExecInspect(ctx, execID)
-	if err != nil || info.Running {
-		return -1
+	for {
+		info, err := docker.ContainerExecInspect(ctx, execID)
+		if err != nil {
+			return -1
+		}
+		if !info.Running {
+			return info.ExitCode
+		}
+		select {
+		case <-ctx.Done():
+			return -1
+		case <-time.After(50 * time.Millisecond):
+		}
 	}
-	return info.ExitCode
 }
 
 func execExitFrame(code int) []byte {

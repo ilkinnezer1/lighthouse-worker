@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict fOOfuJeyMBXvFuDKNoyRdCStN3BfZpT3s7rJWFtEZTjVqwDgvLgXnjc8CXVumsM
+\restrict shcRX78Mp2RmENfeSk19HXUr9TaCxYdAxl6haLR52hxzabUpJuLpbE7J9WfHg58
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -131,6 +131,31 @@ CREATE TYPE public."IdentityProvider" AS ENUM (
 
 
 --
+-- Name: OrgInvitationStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OrgInvitationStatus" AS ENUM (
+    'PENDING',
+    'ACCEPTED',
+    'DECLINED',
+    'REVOKED',
+    'EXPIRED'
+);
+
+
+--
+-- Name: OrgRole; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."OrgRole" AS ENUM (
+    'OWNER',
+    'ADMIN',
+    'MEMBER',
+    'VIEWER'
+);
+
+
+--
 -- Name: SnapshotStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -224,6 +249,20 @@ CREATE TABLE public.database_snapshots (
 
 
 --
+-- Name: deployment_branches; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deployment_branches (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deployment_id uuid NOT NULL,
+    role public."DeploymentBranchRole" NOT NULL,
+    name text NOT NULL,
+    sha text,
+    ordinal integer NOT NULL
+);
+
+
+--
 -- Name: deployment_stages; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -242,20 +281,6 @@ CREATE TABLE public.deployment_stages (
 
 
 --
--- Name: deployment_branches; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.deployment_branches (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    deployment_id uuid NOT NULL,
-    role public."DeploymentBranchRole" NOT NULL,
-    name text NOT NULL,
-    sha text,
-    ordinal integer NOT NULL
-);
-
-
---
 -- Name: deployments; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -267,13 +292,13 @@ CREATE TABLE public.deployments (
     commit_sha text,
     commit_message text,
     commit_author text,
-    framework text,
     started_at timestamp(3) with time zone,
     finished_at timestamp(3) with time zone,
     last_heartbeat_at timestamp(3) with time zone,
-    cancel_requested_at timestamp(3) with time zone,
     error_summary text,
-    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    cancel_requested_at timestamp(3) with time zone,
+    framework text
 );
 
 
@@ -292,7 +317,8 @@ CREATE TABLE public.environments (
     env_vars_enc text,
     active boolean DEFAULT true NOT NULL,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) with time zone NOT NULL
+    updated_at timestamp(3) with time zone NOT NULL,
+    pr_number integer
 );
 
 
@@ -384,12 +410,56 @@ CREATE TABLE public.managed_files (
 
 
 --
+-- Name: org_invitations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_invitations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    role public."OrgRole" NOT NULL,
+    invited_by_user_id uuid NOT NULL,
+    invitee_user_id uuid,
+    token_hash text,
+    email text,
+    status public."OrgInvitationStatus" DEFAULT 'PENDING'::public."OrgInvitationStatus" NOT NULL,
+    expires_at timestamp(3) with time zone NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: org_memberships; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.org_memberships (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    role public."OrgRole" NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: organizations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.organizations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    slug text NOT NULL,
+    is_personal boolean DEFAULT false NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
 -- Name: projects; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.projects (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    owner_id uuid NOT NULL,
     name text NOT NULL,
     slug text NOT NULL,
     subdomain text NOT NULL,
@@ -398,7 +468,11 @@ CREATE TABLE public.projects (
     build_config jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
-    deleted_at timestamp(3) with time zone
+    deleted_at timestamp(3) with time zone,
+    provider_repo_full_name text,
+    webhook_secret_enc text,
+    organization_id uuid NOT NULL,
+    created_by_user_id uuid NOT NULL
 );
 
 
@@ -454,6 +528,20 @@ CREATE TABLE public.users (
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
     username public.citext NOT NULL
+);
+
+
+--
+-- Name: webhook_deliveries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.webhook_deliveries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    provider text NOT NULL,
+    delivery_id text NOT NULL,
+    event_type text NOT NULL,
+    project_id uuid,
+    received_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 
@@ -560,6 +648,30 @@ ALTER TABLE ONLY public.managed_files
 
 
 --
+-- Name: org_invitations org_invitations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_invitations
+    ADD CONSTRAINT org_invitations_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: org_memberships org_memberships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_memberships
+    ADD CONSTRAINT org_memberships_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: organizations organizations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organizations
+    ADD CONSTRAINT organizations_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: projects projects_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -589,6 +701,14 @@ ALTER TABLE ONLY public.user_identities
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: webhook_deliveries webhook_deliveries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.webhook_deliveries
+    ADD CONSTRAINT webhook_deliveries_pkey PRIMARY KEY (id);
 
 
 --
@@ -697,24 +817,87 @@ CREATE UNIQUE INDEX managed_files_environment_id_path_key ON public.managed_file
 
 
 --
--- Name: projects_owner_id_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: org_invitations_invitee_user_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX projects_owner_id_idx ON public.projects USING btree (owner_id);
-
-
---
--- Name: projects_owner_id_slug_key; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX projects_owner_id_slug_key ON public.projects USING btree (owner_id, slug);
+CREATE INDEX org_invitations_invitee_user_id_idx ON public.org_invitations USING btree (invitee_user_id);
 
 
 --
--- Name: projects_owner_id_subdomain_key; Type: INDEX; Schema: public; Owner: -
+-- Name: org_invitations_org_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX projects_owner_id_subdomain_key ON public.projects USING btree (owner_id, subdomain);
+CREATE INDEX org_invitations_org_id_idx ON public.org_invitations USING btree (org_id);
+
+
+--
+-- Name: org_invitations_pending_invitee_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX org_invitations_pending_invitee_key ON public.org_invitations USING btree (org_id, invitee_user_id) WHERE ((status = 'PENDING'::public."OrgInvitationStatus") AND (invitee_user_id IS NOT NULL));
+
+
+--
+-- Name: org_invitations_token_hash_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX org_invitations_token_hash_key ON public.org_invitations USING btree (token_hash);
+
+
+--
+-- Name: org_memberships_org_id_user_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX org_memberships_org_id_user_id_key ON public.org_memberships USING btree (org_id, user_id);
+
+
+--
+-- Name: org_memberships_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX org_memberships_user_id_idx ON public.org_memberships USING btree (user_id);
+
+
+--
+-- Name: organizations_slug_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX organizations_slug_key ON public.organizations USING btree (slug);
+
+
+--
+-- Name: projects_created_by_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX projects_created_by_user_id_idx ON public.projects USING btree (created_by_user_id);
+
+
+--
+-- Name: projects_created_by_user_id_slug_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX projects_created_by_user_id_slug_key ON public.projects USING btree (created_by_user_id, slug);
+
+
+--
+-- Name: projects_created_by_user_id_subdomain_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX projects_created_by_user_id_subdomain_key ON public.projects USING btree (created_by_user_id, subdomain);
+
+
+--
+-- Name: projects_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX projects_organization_id_idx ON public.projects USING btree (organization_id);
+
+
+--
+-- Name: projects_provider_repo_full_name_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX projects_provider_repo_full_name_idx ON public.projects USING btree (provider_repo_full_name);
 
 
 --
@@ -750,6 +933,20 @@ CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email);
 --
 
 CREATE UNIQUE INDEX users_username_key ON public.users USING btree (username);
+
+
+--
+-- Name: webhook_deliveries_project_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX webhook_deliveries_project_id_idx ON public.webhook_deliveries USING btree (project_id);
+
+
+--
+-- Name: webhook_deliveries_provider_delivery_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX webhook_deliveries_provider_delivery_id_key ON public.webhook_deliveries USING btree (provider, delivery_id);
 
 
 --
@@ -857,11 +1054,59 @@ ALTER TABLE ONLY public.managed_files
 
 
 --
--- Name: projects projects_owner_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: org_invitations org_invitations_invited_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_invitations
+    ADD CONSTRAINT org_invitations_invited_by_user_id_fkey FOREIGN KEY (invited_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: org_invitations org_invitations_invitee_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_invitations
+    ADD CONSTRAINT org_invitations_invitee_user_id_fkey FOREIGN KEY (invitee_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: org_invitations org_invitations_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_invitations
+    ADD CONSTRAINT org_invitations_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: org_memberships org_memberships_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_memberships
+    ADD CONSTRAINT org_memberships_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: org_memberships org_memberships_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.org_memberships
+    ADD CONSTRAINT org_memberships_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: projects projects_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.projects
-    ADD CONSTRAINT projects_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT projects_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: projects projects_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.projects
+    ADD CONSTRAINT projects_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
@@ -884,5 +1129,5 @@ ALTER TABLE ONLY public.user_identities
 -- PostgreSQL database dump complete
 --
 
-\unrestrict fOOfuJeyMBXvFuDKNoyRdCStN3BfZpT3s7rJWFtEZTjVqwDgvLgXnjc8CXVumsM
+\unrestrict shcRX78Mp2RmENfeSk19HXUr9TaCxYdAxl6haLR52hxzabUpJuLpbE7J9WfHg58
 

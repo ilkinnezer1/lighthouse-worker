@@ -13,19 +13,25 @@ import (
 )
 
 func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o buildOverrides) error {
+	envs, migrate, err := r.deployEnvs(ctx, dep, o)
+	if err != nil {
+		return err
+	}
+	return r.runImage(ctx, dep, envs, resolvePort(o.Port), migrate)
+}
+
+// runImage starts the single deploy container from a prebuilt image tagged
+// ImageTag(dep.ID): network wiring, env injection, and web-service recording.
+// Shared by the dockerfile and nixpacks strategies (nixpacks produces the same
+// image tag), so both flow through one run/health/retire/rollback path. migrate
+// runs `artisan migrate` once the container is up (Laravel + SQL managed DB).
+func (r *Run) runImage(ctx context.Context, dep *pipeline.Deployment, envs map[string]string, port int, migrate bool) error {
 	if err := r.ensureNetwork(ctx, publicNetwork); err != nil {
 		return err
 	}
 	if err := r.ensureNetwork(ctx, envNetwork(dep.EnvironmentID)); err != nil {
 		return err
 	}
-
-	envs, err := r.deployEnvs(ctx, dep)
-	if err != nil {
-		return err
-	}
-
-	port := resolvePort(o.Port)
 
 	containerID, err := r.startContainer(ctx, dep, envs, port)
 	if err != nil {
@@ -35,6 +41,9 @@ func (r *Run) runDockerfile(ctx context.Context, dep *pipeline.Deployment, o bui
 	r.logLine(ctx, dep.ID, "container started: "+containerID[:12])
 	if err := r.recordService(ctx, dep, containerID, port); err != nil {
 		return err
+	}
+	if migrate {
+		r.migrateLaravel(ctx, dep.ID, containerID)
 	}
 	return nil
 }

@@ -110,12 +110,11 @@ SELECT d.id,
        p.repo_url,
        p.default_branch,
        p.build_config,
-       p.owner_id,
-       u.username::text    AS owner_username
+       o.slug              AS org_slug
 FROM deployments d
          JOIN environments e ON e.id = d.environment_id
          JOIN projects p ON p.id = e.project_id
-         JOIN users u ON u.id = p.owner_id
+         JOIN organizations o ON o.id = p.organization_id
 WHERE d.id = $1
 `
 
@@ -135,8 +134,7 @@ type GetDeploymentForJobRow struct {
 	RepoUrl           string
 	DefaultBranch     string
 	BuildConfig       []byte
-	OwnerID           pgtype.UUID
-	OwnerUsername     string
+	OrgSlug           string
 }
 
 func (q *Queries) GetDeploymentForJob(ctx context.Context, id pgtype.UUID) (GetDeploymentForJobRow, error) {
@@ -158,34 +156,30 @@ func (q *Queries) GetDeploymentForJob(ctx context.Context, id pgtype.UUID) (GetD
 		&i.RepoUrl,
 		&i.DefaultBranch,
 		&i.BuildConfig,
-		&i.OwnerID,
-		&i.OwnerUsername,
+		&i.OrgSlug,
 	)
 	return i, err
 }
 
 const getEnvironmentForTeardown = `-- name: GetEnvironmentForTeardown :one
 SELECT e.id,
-       e.name           AS env_name,
-       e.subdomain      AS env_subdomain,
+       e.name    AS env_name,
+       e.subdomain AS env_subdomain,
        e.active,
-       p.id             AS project_id,
-       p.owner_id,
-       u.username::text AS owner_username
+       p.id      AS project_id,
+       p.created_by_user_id
 FROM environments e
          JOIN projects p ON p.id = e.project_id
-         JOIN users u ON u.id = p.owner_id
 WHERE e.id = $1
 `
 
 type GetEnvironmentForTeardownRow struct {
-	ID            pgtype.UUID
-	EnvName       string
-	EnvSubdomain  string
-	Active        bool
-	ProjectID     pgtype.UUID
-	OwnerID       pgtype.UUID
-	OwnerUsername string
+	ID              pgtype.UUID
+	EnvName         string
+	EnvSubdomain    string
+	Active          bool
+	ProjectID       pgtype.UUID
+	CreatedByUserID pgtype.UUID
 }
 
 func (q *Queries) GetEnvironmentForTeardown(ctx context.Context, id pgtype.UUID) (GetEnvironmentForTeardownRow, error) {
@@ -197,8 +191,7 @@ func (q *Queries) GetEnvironmentForTeardown(ctx context.Context, id pgtype.UUID)
 		&i.EnvSubdomain,
 		&i.Active,
 		&i.ProjectID,
-		&i.OwnerID,
-		&i.OwnerUsername,
+		&i.CreatedByUserID,
 	)
 	return i, err
 }

@@ -1,4 +1,4 @@
--- name: GetGithubTokenForOwner :one
+-- name: GetGithubTokenForUser :one
 SELECT access_token_enc
 FROM user_identities
 WHERE user_id = $1

@@ -27,8 +27,12 @@ func (b *Build) Run(ctx context.Context, dep *pipeline.Deployment) error {
 		return b.buildDockerfile(ctx, dep)
 	case StrategyCompose:
 		return b.buildCompose(ctx, dep)
+	case StrategyNixpacks:
+		return b.buildNixpacks(ctx, dep)
+	case StrategyGenerated:
+		return b.buildGenerated(ctx, dep)
 	default:
-		return fmt.Errorf("no Dockerfile or compose file found in %s", dep.WorkDir)
+		return fmt.Errorf("unknown build strategy for %s", dep.WorkDir)
 	}
 }
 
@@ -93,4 +97,8 @@ func (b *Build) rollbackCompose(ctx context.Context, dep *pipeline.Deployment) e
 
 func ImageTag(deploymentID string) string {
 	return "deploy-" + deploymentID
+}
+
+func (b *Build) logLine(ctx context.Context, deploymentID, line string) {
+	_ = b.logs.WriteLine(ctx, deploymentID, "build", line)
 }

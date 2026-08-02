@@ -6,14 +6,13 @@ type Deployment struct {
 	ID                string
 	EnvironmentID     string
 	ProjectID         string
-	OwnerID           string
 	TriggeredByUserID string
 	RepoURL           string
 	Branch            string
 	EnvName           string
 	EnvSubdomain      string
 	ProjectSubdomain  string
-	OwnerUsername     string
+	OrgSlug           string
 	CustomDomain      string
 	BuildConfig       []byte
 	WorkDir           string
