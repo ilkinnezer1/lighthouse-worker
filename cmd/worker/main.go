@@ -28,6 +28,7 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/teardown"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/volumebackup"
 )
 
 func main() {
@@ -126,6 +127,13 @@ func main() {
 		LogLabel: "Queue.database",
 	}, databaseRouter.Route)
 
+	volumeBackupRouter := volumebackup.NewRouter(docker, q, mc, root)
+	volumeBackupConsumer := queue.NewFields(rdb, root, queue.Config{
+		Stream:   "jobs:volume-backup",
+		Group:    "worker",
+		LogLabel: "Queue.volumeBackup",
+	}, volumeBackupRouter.Route)
+
 	boot.Info("ready")
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -133,6 +141,7 @@ func main() {
 	g.Go(func() error { return buildConsumer.Run(gCtx) })
 	g.Go(func() error { return teardownConsumer.Run(gCtx) })
 	g.Go(func() error { return databaseConsumer.Run(gCtx) })
+	g.Go(func() error { return volumeBackupConsumer.Run(gCtx) })
 
 	if err := g.Wait(); err != nil {
 		boot.Error("stopped with error", slog.Any("err", err))

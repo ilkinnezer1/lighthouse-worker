@@ -120,6 +120,61 @@ func (e DatabaseType) Valid() bool {
 	return false
 }
 
+type DeliveryStatus string
+
+const (
+	DeliveryStatusPENDING DeliveryStatus = "PENDING"
+	DeliveryStatusSENT    DeliveryStatus = "SENT"
+	DeliveryStatusFAILED  DeliveryStatus = "FAILED"
+	DeliveryStatusDEAD    DeliveryStatus = "DEAD"
+)
+
+func (e *DeliveryStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DeliveryStatus(s)
+	case string:
+		*e = DeliveryStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DeliveryStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDeliveryStatus struct {
+	DeliveryStatus DeliveryStatus
+	Valid          bool // Valid is true if DeliveryStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDeliveryStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DeliveryStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DeliveryStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDeliveryStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DeliveryStatus), nil
+}
+
+func (e DeliveryStatus) Valid() bool {
+	switch e {
+	case DeliveryStatusPENDING,
+		DeliveryStatusSENT,
+		DeliveryStatusFAILED,
+		DeliveryStatusDEAD:
+		return true
+	}
+	return false
+}
+
 type DeploymentBranchRole string
 
 const (
@@ -456,6 +511,59 @@ func (e IdentityProvider) Valid() bool {
 	return false
 }
 
+type NotificationKind string
+
+const (
+	NotificationKindSLACK   NotificationKind = "SLACK"
+	NotificationKindDISCORD NotificationKind = "DISCORD"
+	NotificationKindWEBHOOK NotificationKind = "WEBHOOK"
+)
+
+func (e *NotificationKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NotificationKind(s)
+	case string:
+		*e = NotificationKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NotificationKind: %T", src)
+	}
+	return nil
+}
+
+type NullNotificationKind struct {
+	NotificationKind NotificationKind
+	Valid            bool // Valid is true if NotificationKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNotificationKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.NotificationKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NotificationKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNotificationKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NotificationKind), nil
+}
+
+func (e NotificationKind) Valid() bool {
+	switch e {
+	case NotificationKindSLACK,
+		NotificationKindDISCORD,
+		NotificationKindWEBHOOK:
+		return true
+	}
+	return false
+}
+
 type OrgInvitationStatus string
 
 const (
@@ -621,6 +729,163 @@ func (e SnapshotStatus) Valid() bool {
 	return false
 }
 
+type TaskOverlapPolicy string
+
+const (
+	TaskOverlapPolicySKIP  TaskOverlapPolicy = "SKIP"
+	TaskOverlapPolicyQUEUE TaskOverlapPolicy = "QUEUE"
+)
+
+func (e *TaskOverlapPolicy) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TaskOverlapPolicy(s)
+	case string:
+		*e = TaskOverlapPolicy(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TaskOverlapPolicy: %T", src)
+	}
+	return nil
+}
+
+type NullTaskOverlapPolicy struct {
+	TaskOverlapPolicy TaskOverlapPolicy
+	Valid             bool // Valid is true if TaskOverlapPolicy is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTaskOverlapPolicy) Scan(value interface{}) error {
+	if value == nil {
+		ns.TaskOverlapPolicy, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TaskOverlapPolicy.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTaskOverlapPolicy) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TaskOverlapPolicy), nil
+}
+
+func (e TaskOverlapPolicy) Valid() bool {
+	switch e {
+	case TaskOverlapPolicySKIP,
+		TaskOverlapPolicyQUEUE:
+		return true
+	}
+	return false
+}
+
+type TaskRunStatus string
+
+const (
+	TaskRunStatusRUNNING   TaskRunStatus = "RUNNING"
+	TaskRunStatusSUCCEEDED TaskRunStatus = "SUCCEEDED"
+	TaskRunStatusFAILED    TaskRunStatus = "FAILED"
+	TaskRunStatusSKIPPED   TaskRunStatus = "SKIPPED"
+)
+
+func (e *TaskRunStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TaskRunStatus(s)
+	case string:
+		*e = TaskRunStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TaskRunStatus: %T", src)
+	}
+	return nil
+}
+
+type NullTaskRunStatus struct {
+	TaskRunStatus TaskRunStatus
+	Valid         bool // Valid is true if TaskRunStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTaskRunStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.TaskRunStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TaskRunStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTaskRunStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TaskRunStatus), nil
+}
+
+func (e TaskRunStatus) Valid() bool {
+	switch e {
+	case TaskRunStatusRUNNING,
+		TaskRunStatusSUCCEEDED,
+		TaskRunStatusFAILED,
+		TaskRunStatusSKIPPED:
+		return true
+	}
+	return false
+}
+
+type TaskRunTrigger string
+
+const (
+	TaskRunTriggerSCHEDULE TaskRunTrigger = "SCHEDULE"
+	TaskRunTriggerMANUAL   TaskRunTrigger = "MANUAL"
+)
+
+func (e *TaskRunTrigger) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = TaskRunTrigger(s)
+	case string:
+		*e = TaskRunTrigger(s)
+	default:
+		return fmt.Errorf("unsupported scan type for TaskRunTrigger: %T", src)
+	}
+	return nil
+}
+
+type NullTaskRunTrigger struct {
+	TaskRunTrigger TaskRunTrigger
+	Valid          bool // Valid is true if TaskRunTrigger is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullTaskRunTrigger) Scan(value interface{}) error {
+	if value == nil {
+		ns.TaskRunTrigger, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.TaskRunTrigger.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullTaskRunTrigger) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.TaskRunTrigger), nil
+}
+
+func (e TaskRunTrigger) Valid() bool {
+	switch e {
+	case TaskRunTriggerSCHEDULE,
+		TaskRunTriggerMANUAL:
+		return true
+	}
+	return false
+}
+
 type UserRole string
 
 const (
@@ -693,6 +958,8 @@ type DatabaseSnapshot struct {
 	SizeBytes    *int64
 	ErrorSummary *string
 	CreatedAt    pgtype.Timestamptz
+	IsBaseline   bool
+	Label        *string
 }
 
 type Deployment struct {
@@ -797,6 +1064,31 @@ type ManagedFile struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type NotificationChannel struct {
+	ID        pgtype.UUID
+	OrgID     pgtype.UUID
+	Name      string
+	Kind      NotificationKind
+	ConfigEnc string
+	Enabled   bool
+	Events    []string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+type NotificationDelivery struct {
+	ID            pgtype.UUID
+	ChannelID     pgtype.UUID
+	EventID       string
+	Event         string
+	Status        DeliveryStatus
+	Attempts      int32
+	LastError     *string
+	NextAttemptAt pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	SentAt        pgtype.Timestamptz
+}
+
 type OrgInvitation struct {
 	ID              pgtype.UUID
 	OrgID           pgtype.UUID
@@ -855,6 +1147,23 @@ type Project struct {
 	CreatedByUserID      pgtype.UUID
 }
 
+type ScheduledTask struct {
+	ID            pgtype.UUID
+	EnvironmentID pgtype.UUID
+	Name          string
+	Service       string
+	Command       string
+	Schedule      string
+	Timezone      string
+	Enabled       bool
+	TimeoutSec    int32
+	Overlap       TaskOverlapPolicy
+	LastRunAt     pgtype.Timestamptz
+	NextRunAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type Service struct {
 	ID           pgtype.UUID
 	DeploymentID pgtype.UUID
@@ -865,6 +1174,19 @@ type Service struct {
 	Port         *int32
 	IsWeb        bool
 	Status       *string
+}
+
+type TaskRun struct {
+	ID           pgtype.UUID
+	TaskID       pgtype.UUID
+	DeploymentID pgtype.UUID
+	Status       TaskRunStatus
+	Trigger      TaskRunTrigger
+	ExitCode     *int32
+	Output       *string
+	ErrorSummary *string
+	StartedAt    pgtype.Timestamptz
+	FinishedAt   pgtype.Timestamptz
 }
 
 type User struct {
@@ -893,6 +1215,19 @@ type UserIdentity struct {
 	Scopes          []string
 	CreatedAt       pgtype.Timestamptz
 	UpdatedAt       pgtype.Timestamptz
+}
+
+type VolumeBackup struct {
+	ID            pgtype.UUID
+	EnvironmentID pgtype.UUID
+	VolumeName    string
+	Status        SnapshotStatus
+	StorageKey    *string
+	SizeBytes     *int64
+	ErrorSummary  *string
+	Label         *string
+	CreatedAt     pgtype.Timestamptz
+	CompletedAt   pgtype.Timestamptz
 }
 
 type WebhookDelivery struct {

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict shcRX78Mp2RmENfeSk19HXUr9TaCxYdAxl6haLR52hxzabUpJuLpbE7J9WfHg58
+\restrict DFav1t3uASzsFgi8frcSK5TowSO4xRAvdxGsPWF8ddQJmtCoofiLK6GVpWgZOLT
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -26,10 +26,24 @@ SET row_security = off;
 
 
 --
+-- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON SCHEMA public IS '';
+
+
+--
 -- Name: citext; Type: EXTENSION; Schema: -; Owner: -
 --
 
 CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+
+
+--
+-- Name: EXTENSION citext; Type: COMMENT; Schema: -; Owner: -
+--
+
+COMMENT ON EXTENSION citext IS 'data type for case-insensitive character strings';
 
 
 --
@@ -52,6 +66,18 @@ CREATE TYPE public."DatabaseType" AS ENUM (
     'MYSQL',
     'REDIS',
     'MONGO'
+);
+
+
+--
+-- Name: DeliveryStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."DeliveryStatus" AS ENUM (
+    'PENDING',
+    'SENT',
+    'FAILED',
+    'DEAD'
 );
 
 
@@ -131,6 +157,17 @@ CREATE TYPE public."IdentityProvider" AS ENUM (
 
 
 --
+-- Name: NotificationKind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."NotificationKind" AS ENUM (
+    'SLACK',
+    'DISCORD',
+    'WEBHOOK'
+);
+
+
+--
 -- Name: OrgInvitationStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -163,6 +200,38 @@ CREATE TYPE public."SnapshotStatus" AS ENUM (
     'PENDING',
     'READY',
     'FAILED'
+);
+
+
+--
+-- Name: TaskOverlapPolicy; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."TaskOverlapPolicy" AS ENUM (
+    'SKIP',
+    'QUEUE'
+);
+
+
+--
+-- Name: TaskRunStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."TaskRunStatus" AS ENUM (
+    'RUNNING',
+    'SUCCEEDED',
+    'FAILED',
+    'SKIPPED'
+);
+
+
+--
+-- Name: TaskRunTrigger; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."TaskRunTrigger" AS ENUM (
+    'SCHEDULE',
+    'MANUAL'
 );
 
 
@@ -244,7 +313,9 @@ CREATE TABLE public.database_snapshots (
     storage_key text,
     size_bytes bigint,
     error_summary text,
-    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    is_baseline boolean DEFAULT false NOT NULL,
+    label text
 );
 
 
@@ -410,6 +481,41 @@ CREATE TABLE public.managed_files (
 
 
 --
+-- Name: notification_channels; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_channels (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    org_id uuid NOT NULL,
+    name text NOT NULL,
+    kind public."NotificationKind" NOT NULL,
+    config_enc text NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    events text[] DEFAULT ARRAY[]::text[],
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
+-- Name: notification_deliveries; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_deliveries (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    channel_id uuid NOT NULL,
+    event_id text NOT NULL,
+    event text NOT NULL,
+    status public."DeliveryStatus" DEFAULT 'PENDING'::public."DeliveryStatus" NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    last_error text,
+    next_attempt_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    sent_at timestamp(3) with time zone
+);
+
+
+--
 -- Name: org_invitations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -477,6 +583,28 @@ CREATE TABLE public.projects (
 
 
 --
+-- Name: scheduled_tasks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.scheduled_tasks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    name text NOT NULL,
+    service text NOT NULL,
+    command text NOT NULL,
+    schedule text NOT NULL,
+    timezone text DEFAULT 'UTC'::text NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    timeout_sec integer DEFAULT 900 NOT NULL,
+    overlap public."TaskOverlapPolicy" DEFAULT 'SKIP'::public."TaskOverlapPolicy" NOT NULL,
+    last_run_at timestamp(3) with time zone,
+    next_run_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
 -- Name: services; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -490,6 +618,24 @@ CREATE TABLE public.services (
     port integer,
     is_web boolean DEFAULT false NOT NULL,
     status text
+);
+
+
+--
+-- Name: task_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.task_runs (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    task_id uuid NOT NULL,
+    deployment_id uuid,
+    status public."TaskRunStatus" NOT NULL,
+    trigger public."TaskRunTrigger" DEFAULT 'SCHEDULE'::public."TaskRunTrigger" NOT NULL,
+    exit_code integer,
+    output text,
+    error_summary text,
+    started_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    finished_at timestamp(3) with time zone
 );
 
 
@@ -528,6 +674,24 @@ CREATE TABLE public.users (
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
     username public.citext NOT NULL
+);
+
+
+--
+-- Name: volume_backups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.volume_backups (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    volume_name text NOT NULL,
+    status public."SnapshotStatus" DEFAULT 'PENDING'::public."SnapshotStatus" NOT NULL,
+    storage_key text,
+    size_bytes bigint,
+    error_summary text,
+    label text,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    completed_at timestamp(3) with time zone
 );
 
 
@@ -648,6 +812,22 @@ ALTER TABLE ONLY public.managed_files
 
 
 --
+-- Name: notification_channels notification_channels_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_channels
+    ADD CONSTRAINT notification_channels_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: notification_deliveries notification_deliveries_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_deliveries
+    ADD CONSTRAINT notification_deliveries_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: org_invitations org_invitations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -680,11 +860,27 @@ ALTER TABLE ONLY public.projects
 
 
 --
+-- Name: scheduled_tasks scheduled_tasks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scheduled_tasks
+    ADD CONSTRAINT scheduled_tasks_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: services services_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.services
     ADD CONSTRAINT services_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: task_runs task_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.task_runs
+    ADD CONSTRAINT task_runs_pkey PRIMARY KEY (id);
 
 
 --
@@ -701,6 +897,14 @@ ALTER TABLE ONLY public.user_identities
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: volume_backups volume_backups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.volume_backups
+    ADD CONSTRAINT volume_backups_pkey PRIMARY KEY (id);
 
 
 --
@@ -723,6 +927,13 @@ CREATE INDEX audit_log_actor_user_id_created_at_idx ON public.audit_log USING bt
 --
 
 CREATE INDEX database_snapshots_database_id_created_at_idx ON public.database_snapshots USING btree (database_id, created_at DESC);
+
+
+--
+-- Name: database_snapshots_database_id_is_baseline_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX database_snapshots_database_id_is_baseline_idx ON public.database_snapshots USING btree (database_id, is_baseline);
 
 
 --
@@ -765,6 +976,13 @@ CREATE INDEX deployments_environment_id_created_at_idx ON public.deployments USI
 --
 
 CREATE INDEX deployments_status_idx ON public.deployments USING btree (status) WHERE (status = ANY (ARRAY['QUEUED'::public."DeploymentStatus", 'CLONING'::public."DeploymentStatus", 'BUILDING'::public."DeploymentStatus", 'PUSHING'::public."DeploymentStatus", 'STARTING'::public."DeploymentStatus"]));
+
+
+--
+-- Name: environments_custom_domain_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX environments_custom_domain_key ON public.environments USING btree (custom_domain);
 
 
 --
@@ -814,6 +1032,27 @@ CREATE UNIQUE INDEX managed_databases_environment_id_name_key ON public.managed_
 --
 
 CREATE UNIQUE INDEX managed_files_environment_id_path_key ON public.managed_files USING btree (environment_id, path);
+
+
+--
+-- Name: notification_channels_org_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notification_channels_org_id_idx ON public.notification_channels USING btree (org_id);
+
+
+--
+-- Name: notification_deliveries_event_id_channel_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX notification_deliveries_event_id_channel_id_key ON public.notification_deliveries USING btree (event_id, channel_id);
+
+
+--
+-- Name: notification_deliveries_status_next_attempt_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notification_deliveries_status_next_attempt_at_idx ON public.notification_deliveries USING btree (status, next_attempt_at);
 
 
 --
@@ -901,10 +1140,31 @@ CREATE INDEX projects_provider_repo_full_name_idx ON public.projects USING btree
 
 
 --
+-- Name: scheduled_tasks_enabled_next_run_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX scheduled_tasks_enabled_next_run_at_idx ON public.scheduled_tasks USING btree (enabled, next_run_at);
+
+
+--
+-- Name: scheduled_tasks_environment_id_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX scheduled_tasks_environment_id_name_key ON public.scheduled_tasks USING btree (environment_id, name);
+
+
+--
 -- Name: services_deployment_id_name_key; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE UNIQUE INDEX services_deployment_id_name_key ON public.services USING btree (deployment_id, name);
+
+
+--
+-- Name: task_runs_task_id_started_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX task_runs_task_id_started_at_idx ON public.task_runs USING btree (task_id, started_at DESC);
 
 
 --
@@ -933,6 +1193,13 @@ CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email);
 --
 
 CREATE UNIQUE INDEX users_username_key ON public.users USING btree (username);
+
+
+--
+-- Name: volume_backups_environment_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX volume_backups_environment_id_created_at_idx ON public.volume_backups USING btree (environment_id, created_at DESC);
 
 
 --
@@ -1054,6 +1321,22 @@ ALTER TABLE ONLY public.managed_files
 
 
 --
+-- Name: notification_channels notification_channels_org_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_channels
+    ADD CONSTRAINT notification_channels_org_id_fkey FOREIGN KEY (org_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: notification_deliveries notification_deliveries_channel_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_deliveries
+    ADD CONSTRAINT notification_deliveries_channel_id_fkey FOREIGN KEY (channel_id) REFERENCES public.notification_channels(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: org_invitations org_invitations_invited_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1110,11 +1393,27 @@ ALTER TABLE ONLY public.projects
 
 
 --
+-- Name: scheduled_tasks scheduled_tasks_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.scheduled_tasks
+    ADD CONSTRAINT scheduled_tasks_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: services services_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.services
     ADD CONSTRAINT services_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: task_runs task_runs_task_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.task_runs
+    ADD CONSTRAINT task_runs_task_id_fkey FOREIGN KEY (task_id) REFERENCES public.scheduled_tasks(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -1126,8 +1425,16 @@ ALTER TABLE ONLY public.user_identities
 
 
 --
+-- Name: volume_backups volume_backups_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.volume_backups
+    ADD CONSTRAINT volume_backups_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- PostgreSQL database dump complete
 --
 
-\unrestrict shcRX78Mp2RmENfeSk19HXUr9TaCxYdAxl6haLR52hxzabUpJuLpbE7J9WfHg58
+\unrestrict DFav1t3uASzsFgi8frcSK5TowSO4xRAvdxGsPWF8ddQJmtCoofiLK6GVpWgZOLT
 

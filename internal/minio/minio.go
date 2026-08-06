@@ -71,3 +71,14 @@ func (c *Client) DeleteObject(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// PutObjectStream uploads a stream of unknown length and reports how many bytes
+// landed. Volume archives can be far larger than this process should ever hold
+// in memory, so the size is discovered by uploading rather than known up front.
+func (c *Client) PutObjectStream(ctx context.Context, key string, r io.Reader) (int64, error) {
+	info, err := c.mc.PutObject(ctx, c.bucket, key, r, -1, minio.PutObjectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("put object %q: %w", key, err)
+	}
+	return info.Size, nil
+}
