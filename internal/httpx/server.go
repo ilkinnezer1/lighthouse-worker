@@ -33,6 +33,7 @@ func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries,
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/stats", serviceStats(docker, q, logger.Ctx(log, "ServiceStats")))
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/health", serviceHealth(docker, q, logger.Ctx(log, "ServiceHealth")))
 	mux.HandleFunc("GET /deployments/{id}/services/{name}/exec", containerExec(docker, q, logger.Ctx(log, "ContainerExec")))
+	mux.HandleFunc("GET /databases/state", databaseStates(docker, logger.Ctx(log, "DatabaseState")))
 	mux.HandleFunc("GET /environments/{id}/volumes", environmentVolumes(docker, logger.Ctx(log, "Volumes")))
 	mux.HandleFunc("DELETE /environments/{id}/volumes/{name}", deleteEnvironmentVolume(docker, logger.Ctx(log, "Volumes")))
 	mux.HandleFunc("GET /deployments/{id}/files/tree", filesTree(workDir, logger.Ctx(log, "FilesTree")))

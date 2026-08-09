@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict XahhakRho44BS9ZGWfhwpNbvCS7EzUQKd631HiknFSe6glzKvTqzWJUwuGBcfUr
+\restrict upZAuqjSGdC34tuTntAIjyPomSILz0Y3vfM2HJ5OsNmF4l8OVbwIsxVqNNSrMIc
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -347,7 +347,8 @@ CREATE TABLE public.database_snapshots (
     error_summary text,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     is_baseline boolean DEFAULT false NOT NULL,
-    label text
+    label text,
+    automatic boolean DEFAULT false NOT NULL
 );
 
 
@@ -723,7 +724,9 @@ CREATE TABLE public.volume_backups (
     error_summary text,
     label text,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    completed_at timestamp(3) with time zone
+    completed_at timestamp(3) with time zone,
+    automatic boolean DEFAULT false NOT NULL,
+    is_baseline boolean DEFAULT false NOT NULL
 );
 
 
@@ -1521,5 +1524,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict XahhakRho44BS9ZGWfhwpNbvCS7EzUQKd631HiknFSe6glzKvTqzWJUwuGBcfUr
+\unrestrict upZAuqjSGdC34tuTntAIjyPomSILz0Y3vfM2HJ5OsNmF4l8OVbwIsxVqNNSrMIc
 
