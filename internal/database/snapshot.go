@@ -1,13 +1,11 @@
 package database
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
@@ -25,9 +23,6 @@ func (r *Router) snapshot(ctx context.Context, databaseID, snapshotID string) er
 	if err != nil {
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("get database: %w", err))
 	}
-	if dbRow.Type != dbgen.DatabaseTypePOSTGRES {
-		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("only POSTGRES is supported, got %s", dbRow.Type))
-	}
 	if dbRow.Status != dbgen.DatabaseStatusREADY {
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("database not READY (got %s)", dbRow.Status))
 	}
@@ -38,16 +33,28 @@ func (r *Router) snapshot(ctx context.Context, databaseID, snapshotID string) er
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("ensure bucket: %w", err))
 	}
 
-	storageKey := fmt.Sprintf("%s/%s.dump", databaseID, snapshotID)
+	storageKey := fmt.Sprintf("%s/%s.%s", databaseID, snapshotID, snapshotExt(dbRow.Type))
 
-	dump, err := r.pgDump(ctx, containerName(databaseID), dbRow.Name)
+	dump, finish, err := r.dumpStream(ctx, dbRow, containerName(databaseID))
 	if err != nil {
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, err)
 	}
+	defer dump.Close()
 
-	size := int64(dump.Len())
-	if err := r.mc.PutObject(ctx, storageKey, bytes.NewReader(dump.Bytes()), size); err != nil {
+	// Streamed, not buffered: a dump can be far larger than this process should
+	// hold. The size comes back from the upload rather than being known upfront.
+	size, err := r.mc.PutObjectStream(ctx, storageKey, dump)
+	if err != nil {
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, fmt.Errorf("upload: %w", err))
+	}
+	// A tool that failed partway still uploaded whatever it managed to write.
+	// Drop those bytes: a truncated dump that looks READY is worse than no
+	// snapshot at all, because it is only discovered at restore time.
+	if err := finish(); err != nil {
+		if derr := r.mc.DeleteObject(context.WithoutCancel(ctx), storageKey); derr != nil {
+			log.Warn("could not remove partial dump", slog.Any("err", derr))
+		}
+		return r.markSnapshotFailed(ctx, snapID, snapshotID, err)
 	}
 
 	if err := r.q.MarkSnapshotReady(ctx, dbgen.MarkSnapshotReadyParams{
@@ -97,8 +104,8 @@ func (r *Router) restore(ctx context.Context, databaseID, snapshotID string) err
 	}
 	defer obj.Close()
 
-	if err := r.pgRestore(ctx, containerName(databaseID), dbRow.Name, obj); err != nil {
-		return fmt.Errorf("pg_restore: %w", err)
+	if err := r.restoreInto(ctx, dbRow, containerName(databaseID), obj); err != nil {
+		return fmt.Errorf("restore %s: %w", dbRow.Type, err)
 	}
 
 	if err := r.emit(ctx, eventSnapshotRestored, databaseID, map[string]any{"snapshotId": snapshotID}); err != nil {
@@ -108,22 +115,17 @@ func (r *Router) restore(ctx context.Context, databaseID, snapshotID string) err
 	return nil
 }
 
-func (r *Router) snapshotDelete(ctx context.Context, snapshotID string) error {
+// snapshotDelete removes the stored dump. The key travels on the job because
+// the API drops the row as soon as it enqueues, so there is nothing left to read
+// it from — the same shape as a volume-backup delete.
+func (r *Router) snapshotDelete(ctx context.Context, snapshotID, storageKey string) error {
 	if snapshotID == "" {
 		return errors.New("snapshot-delete job missing snapshotId")
 	}
-	snapID := db.MustUUID(snapshotID)
-	snap, err := r.q.GetSnapshot(ctx, snapID)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("get snapshot: %w", err)
-	}
-	if snap.StorageKey == nil || *snap.StorageKey == "" {
+	if storageKey == "" {
 		return nil
 	}
-	if err := r.mc.DeleteObject(ctx, *snap.StorageKey); err != nil {
+	if err := r.mc.DeleteObject(ctx, storageKey); err != nil {
 		return fmt.Errorf("delete object: %w", err)
 	}
 	return nil

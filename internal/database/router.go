@@ -23,6 +23,7 @@ const (
 	fieldType       = "type"
 	fieldDatabaseID = "databaseId"
 	fieldSnapshotID = "snapshotId"
+	fieldStorageKey = "storageKey"
 )
 
 type Router struct {
@@ -61,7 +62,7 @@ func (r *Router) Route(ctx context.Context, fields map[string]string) error {
 	case JobRestore:
 		return r.restore(ctx, databaseID, snapshotID)
 	case JobSnapshotDelete:
-		return r.snapshotDelete(ctx, snapshotID)
+		return r.snapshotDelete(ctx, snapshotID, fields[fieldStorageKey])
 	default:
 		return fmt.Errorf("unknown job type %q", jobType)
 	}

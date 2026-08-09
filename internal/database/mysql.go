@@ -17,8 +17,8 @@ const (
 )
 
 // provisionMysql starts a MySQL container for a create-empty managed database.
-// Copy / snapshot / restore remain Postgres-only (the API rejects them for
-// MySQL), so this path never seeds.
+// Seeding modes (copy-from-database, create-from-snapshot) stay Postgres-only,
+// so this path never seeds; snapshot and in-place restore work on every engine.
 func (r *Router) provisionMysql(ctx context.Context, row dbgen.GetDatabaseRow, log *slog.Logger) (host string, port int32, connStr string, err error) {
 	networkName := "env-" + db.UUIDString(row.EnvironmentID)
 	if err := r.ensureNetwork(ctx, networkName); err != nil {

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict DFav1t3uASzsFgi8frcSK5TowSO4xRAvdxGsPWF8ddQJmtCoofiLK6GVpWgZOLT
+\restrict XahhakRho44BS9ZGWfhwpNbvCS7EzUQKd631HiknFSe6glzKvTqzWJUwuGBcfUr
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -44,6 +44,16 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 --
 
 COMMENT ON EXTENSION citext IS 'data type for case-insensitive character strings';
+
+
+--
+-- Name: BackupTargetKind; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."BackupTargetKind" AS ENUM (
+    'DATABASE',
+    'VOLUME'
+);
 
 
 --
@@ -300,6 +310,28 @@ CREATE SEQUENCE public.audit_log_id_seq
 --
 
 ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
+
+
+--
+-- Name: backup_schedules; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.backup_schedules (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    kind public."BackupTargetKind" NOT NULL,
+    environment_id uuid NOT NULL,
+    database_id uuid,
+    volume_name text,
+    schedule text NOT NULL,
+    timezone text DEFAULT 'UTC'::text NOT NULL,
+    enabled boolean DEFAULT true NOT NULL,
+    keep_last integer DEFAULT 7 NOT NULL,
+    created_by_id uuid NOT NULL,
+    last_run_at timestamp(3) with time zone,
+    next_run_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
 
 
 --
@@ -740,6 +772,14 @@ ALTER TABLE ONLY public.audit_log
 
 
 --
+-- Name: backup_schedules backup_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_schedules
+    ADD CONSTRAINT backup_schedules_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: database_snapshots database_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -920,6 +960,27 @@ ALTER TABLE ONLY public.webhook_deliveries
 --
 
 CREATE INDEX audit_log_actor_user_id_created_at_idx ON public.audit_log USING btree (actor_user_id, created_at DESC);
+
+
+--
+-- Name: backup_schedules_database_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX backup_schedules_database_id_key ON public.backup_schedules USING btree (database_id);
+
+
+--
+-- Name: backup_schedules_enabled_next_run_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX backup_schedules_enabled_next_run_at_idx ON public.backup_schedules USING btree (enabled, next_run_at);
+
+
+--
+-- Name: backup_schedules_environment_id_volume_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX backup_schedules_environment_id_volume_name_key ON public.backup_schedules USING btree (environment_id, volume_name);
 
 
 --
@@ -1225,6 +1286,30 @@ ALTER TABLE ONLY public.audit_log
 
 
 --
+-- Name: backup_schedules backup_schedules_created_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_schedules
+    ADD CONSTRAINT backup_schedules_created_by_id_fkey FOREIGN KEY (created_by_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: backup_schedules backup_schedules_database_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_schedules
+    ADD CONSTRAINT backup_schedules_database_id_fkey FOREIGN KEY (database_id) REFERENCES public.managed_databases(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: backup_schedules backup_schedules_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.backup_schedules
+    ADD CONSTRAINT backup_schedules_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: database_snapshots database_snapshots_database_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1436,5 +1521,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict DFav1t3uASzsFgi8frcSK5TowSO4xRAvdxGsPWF8ddQJmtCoofiLK6GVpWgZOLT
+\unrestrict XahhakRho44BS9ZGWfhwpNbvCS7EzUQKd631HiknFSe6glzKvTqzWJUwuGBcfUr
 
