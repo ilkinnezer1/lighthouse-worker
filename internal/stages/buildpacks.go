@@ -89,7 +89,7 @@ func (b *Build) writeProcfile(ctx context.Context, dep *pipeline.Deployment, src
 		return noop, fmt.Errorf("write procfile: %w", err)
 	}
 	b.logLine(ctx, dep.ID, "wrote a Procfile for the start command: web: "+startCommand)
-	return func() { os.Remove(path) }, nil
+	return func() { _ = os.Remove(path) }, nil
 }
 
 func buildpacksBuildArgs(dep *pipeline.Deployment, o buildOverrides, builder, src string) []string {

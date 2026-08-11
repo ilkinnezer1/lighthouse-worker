@@ -110,7 +110,7 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 
 	for _, a := range extras {
 		sb.WriteString(" ")
-		sb.WriteString(fmt.Sprintf("%s=%v", a.Key, a.Value))
+		fmt.Fprintf(&sb, "%s=%v", a.Key, a.Value)
 	}
 
 	if delta > 0 && delta < time.Hour {

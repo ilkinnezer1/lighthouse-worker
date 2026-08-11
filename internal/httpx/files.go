@@ -119,7 +119,7 @@ func filesContent(workDir string, log *slog.Logger) http.HandlerFunc {
 			http.Error(w, "file not found", http.StatusNotFound)
 			return
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		buf := make([]byte, maxFileBytes)
 		n, err := io.ReadFull(f, buf)

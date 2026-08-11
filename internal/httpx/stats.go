@@ -67,7 +67,7 @@ func serviceStats(docker *client.Client, q *dbgen.Queries, log *slog.Logger) htt
 			http.Error(w, "stats: "+err.Error(), http.StatusBadGateway)
 			return
 		}
-		defer stats.Body.Close()
+		defer func() { _ = stats.Body.Close() }()
 
 		dec := json.NewDecoder(stats.Body)
 		var frame container.StatsResponse

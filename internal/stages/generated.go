@@ -42,7 +42,7 @@ func (b *Build) buildGenerated(ctx context.Context, dep *pipeline.Deployment) er
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		return fmt.Errorf("write generated dockerfile: %w", err)
 	}
-	defer os.Remove(path)
+	defer func() { _ = os.Remove(path) }()
 
 	b.logLine(ctx, dep.ID, fmt.Sprintf("no Dockerfile or compose file found — Lighthouse generated one (serving on port %d). Copy it into your repo to customize:", port))
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {

@@ -14,7 +14,7 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
-// Returning nil triggers XACK; a non-nil error leaves the message in PEL.
+// Handler returns nil to trigger XACK; a non-nil error leaves the message in PEL.
 type Handler func(ctx context.Context, payloadID string) error
 
 // FieldsHandler receives every field of the stream entry as a string map.

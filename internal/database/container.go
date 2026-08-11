@@ -69,7 +69,7 @@ func (r *Router) ensureImage(ctx context.Context, ref string, log *slog.Logger) 
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return err
 	}

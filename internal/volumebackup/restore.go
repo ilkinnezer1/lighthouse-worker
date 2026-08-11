@@ -43,7 +43,7 @@ func (r *Router) restore(ctx context.Context, backupID string) error {
 	if err != nil {
 		return fmt.Errorf("download archive: %w", err)
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	stopped, err := r.stopWriters(ctx, dockerVolume, log)
 	if err != nil {

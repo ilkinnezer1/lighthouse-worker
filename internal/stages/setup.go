@@ -131,7 +131,7 @@ func (s *Setup) ensureImage(ctx context.Context, ref string) error {
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	_, err = io.Copy(io.Discard, rc)
 	return err
 }
@@ -148,7 +148,7 @@ func (s *Setup) streamLogs(ctx context.Context, deploymentID, containerID string
 		}
 		return
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	pr, pw := io.Pipe()
 	go func() {

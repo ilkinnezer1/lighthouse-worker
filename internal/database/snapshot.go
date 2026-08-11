@@ -39,7 +39,7 @@ func (r *Router) snapshot(ctx context.Context, databaseID, snapshotID string) er
 	if err != nil {
 		return r.markSnapshotFailed(ctx, snapID, snapshotID, err)
 	}
-	defer dump.Close()
+	defer func() { _ = dump.Close() }()
 
 	// Streamed, not buffered: a dump can be far larger than this process should
 	// hold. The size comes back from the upload rather than being known upfront.
@@ -102,7 +102,7 @@ func (r *Router) restore(ctx context.Context, databaseID, snapshotID string) err
 	if err != nil {
 		return fmt.Errorf("download snapshot: %w", err)
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	if err := r.restoreInto(ctx, dbRow, containerName(databaseID), obj); err != nil {
 		return fmt.Errorf("restore %s: %w", dbRow.Type, err)

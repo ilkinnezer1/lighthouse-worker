@@ -30,7 +30,7 @@ func (r *Router) seedFromSnapshot(ctx context.Context, dstContainer, dbName stri
 	if err != nil {
 		return fmt.Errorf("download snapshot: %w", err)
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 
 	log.Info("restoring snapshot into new container", slog.String("snapshotId", db.UUIDString(snapID)))
 	return r.pgRestore(ctx, dstContainer, dbName, obj)

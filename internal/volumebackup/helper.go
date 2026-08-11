@@ -21,7 +21,7 @@ func (r *Router) ensureHelperImage(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("pull %s: %w", helperImage, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	if _, err := io.Copy(io.Discard, rc); err != nil {
 		return fmt.Errorf("pull %s: %w", helperImage, err)
 	}

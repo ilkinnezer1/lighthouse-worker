@@ -1,0 +1,69 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  # contextcheck is deliberately absent: every finding it produced was a
+  # detached context on purpose (shutdown, exec exit-frame, unfreeze/restart).
+  default: standard
+  enable:
+    - bodyclose
+    - durationcheck
+    - gocritic
+    - misspell
+    - nilerr
+    - noctx
+    - rowserrcheck
+    - sqlclosecheck
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+        - shadow
+    misspell:
+      # No locale: en-GB "cancelled" is the wire contract (deploy.cancelled
+      # outbox event, Prisma CANCELLED enum) and must not be "corrected".
+      ignore-rules:
+        - cancelled
+    staticcheck:
+      checks:
+        - all
+        # ST1000 wants a doc comment on every package; the repo's convention is
+        # no comments unless they carry a non-obvious WHY.
+        - -ST1000
+
+  exclusions:
+    generated: lax
+    paths:
+      - internal/db/gen
+    rules:
+      # Retire is documented best-effort: it must never fail a deploy that is
+      # already live and healthy, so it logs and returns nil by design.
+      - path: internal/stages/retire\.go
+        linters:
+          - nilerr
+      # A cancelled context is a clean consumer shutdown, not a failure; nilerr
+      # cannot tell that ctx.Err() differs from a real error.
+      - path: internal/queue/consumer\.go
+        linters:
+          - nilerr
+
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - internal/db/gen
