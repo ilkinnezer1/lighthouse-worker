@@ -32,10 +32,16 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run returns the exit code instead of calling os.Exit so the deferred pool,
+// redis and docker closers actually run on the bootstrap failure paths.
+func run() int {
 	cfg, err := config.Load()
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "config load failed: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	root := slog.New(logger.New(os.Stdout, logger.Options{
@@ -55,7 +61,7 @@ func main() {
 	pool, err := db.Connect(connectCtx, cfg.DatabaseURL)
 	if err != nil {
 		boot.Error("postgres connect failed", slog.Any("err", err))
-		os.Exit(1)
+		return 1
 	}
 	defer pool.Close()
 	boot.Info("postgres connected")
@@ -63,7 +69,7 @@ func main() {
 	rdb, err := redisx.Connect(connectCtx, cfg.RedisURL)
 	if err != nil {
 		boot.Error("redis connect failed", slog.Any("err", err))
-		os.Exit(1)
+		return 1
 	}
 	defer func() { _ = rdb.Close() }()
 	boot.Info("redis connected")
@@ -71,7 +77,7 @@ func main() {
 	docker, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		boot.Error("docker connect failed", slog.Any("err", err))
-		os.Exit(1)
+		return 1
 	}
 	defer func() { _ = docker.Close() }()
 	boot.Info("docker connected")
@@ -83,7 +89,7 @@ func main() {
 	cipher, err := crypto.New(cfg.MasterEncryptionKey)
 	if err != nil {
 		boot.Error("crypto init failed", slog.Any("err", err))
-		os.Exit(1)
+		return 1
 	}
 	stageList := []pipeline.Stage{
 		stages.NewClone(q, cipher, logs),
@@ -118,7 +124,7 @@ func main() {
 	mc, err := minio.New(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, false, root)
 	if err != nil {
 		boot.Error("minio init failed", slog.Any("err", err))
-		os.Exit(1)
+		return 1
 	}
 	databaseRouter := database.NewRouter(docker, q, cipher, mc, root)
 	databaseConsumer := queue.NewFields(rdb, root, queue.Config{
@@ -145,7 +151,8 @@ func main() {
 
 	if err := g.Wait(); err != nil {
 		boot.Error("stopped with error", slog.Any("err", err))
-		os.Exit(1)
+		return 1
 	}
 	boot.Info("shutdown complete")
+	return 0
 }

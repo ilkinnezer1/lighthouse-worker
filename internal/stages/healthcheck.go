@@ -63,7 +63,11 @@ func (h *HealthCheck) Run(ctx context.Context, dep *pipeline.Deployment) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		resp, err := httpClient.Get(url)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return fmt.Errorf("build health probe request: %w", err)
+		}
+		resp, err := httpClient.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			h.logLine(ctx, dep.ID, fmt.Sprintf("health check: ok (HTTP %d)", resp.StatusCode))
