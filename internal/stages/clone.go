@@ -164,8 +164,7 @@ func (c *Clone) runMerge(ctx context.Context, dep *pipeline.Deployment) error {
 			conflicts := gitConflicts(ctx, dep.WorkDir)
 			_ = c.git(ctx, dep, "merge", "--abort")
 			if len(conflicts) > 0 {
-				return fmt.Errorf("merge %s into %s: conflicts in %s",
-					b.Name, source.Name, strings.Join(conflicts, ", "))
+				return mergeConflictError(b.Name, source.Name, conflicts)
 			}
 			return fmt.Errorf("merge %s into %s: %w", b.Name, source.Name, err)
 		}
@@ -192,6 +191,16 @@ func label(b pipeline.Branch) string {
 func (c *Clone) git(ctx context.Context, dep *pipeline.Deployment, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dep.WorkDir}, args...)...)
 	return runCmd(ctx, cmd, c.logs, dep.ID, "clone")
+}
+
+// mergeConflictError is the one place this message is built. The web reads its
+// shape to tell QA a deploy failed on a conflict, and which files to fix
+// (failureReason.ts, kind "merge-conflict"); TestMergeConflictMessageFormat
+// pins it so a reword here fails a test instead of silently degrading that to a
+// generic "deployment failed".
+func mergeConflictError(branch, into string, conflicts []string) error {
+	return fmt.Errorf("merge %s into %s: conflicts in %s",
+		branch, into, strings.Join(conflicts, ", "))
 }
 
 // gitConflicts lists the unmerged paths after a failed merge, for the error.
