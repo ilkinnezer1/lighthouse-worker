@@ -12,6 +12,57 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type BackupTargetKind string
+
+const (
+	BackupTargetKindDATABASE BackupTargetKind = "DATABASE"
+	BackupTargetKindVOLUME   BackupTargetKind = "VOLUME"
+)
+
+func (e *BackupTargetKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = BackupTargetKind(s)
+	case string:
+		*e = BackupTargetKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for BackupTargetKind: %T", src)
+	}
+	return nil
+}
+
+type NullBackupTargetKind struct {
+	BackupTargetKind BackupTargetKind
+	Valid            bool // Valid is true if BackupTargetKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullBackupTargetKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.BackupTargetKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.BackupTargetKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullBackupTargetKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.BackupTargetKind), nil
+}
+
+func (e BackupTargetKind) Valid() bool {
+	switch e {
+	case BackupTargetKindDATABASE,
+		BackupTargetKindVOLUME:
+		return true
+	}
+	return false
+}
+
 type DatabaseStatus string
 
 const (
@@ -950,6 +1001,23 @@ type AuditLog struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type BackupSchedule struct {
+	ID            pgtype.UUID
+	Kind          BackupTargetKind
+	EnvironmentID pgtype.UUID
+	DatabaseID    pgtype.UUID
+	VolumeName    *string
+	Schedule      string
+	Timezone      string
+	Enabled       bool
+	KeepLast      int32
+	CreatedByID   pgtype.UUID
+	LastRunAt     pgtype.Timestamptz
+	NextRunAt     pgtype.Timestamptz
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type DatabaseSnapshot struct {
 	ID           pgtype.UUID
 	DatabaseID   pgtype.UUID
@@ -960,6 +1028,7 @@ type DatabaseSnapshot struct {
 	CreatedAt    pgtype.Timestamptz
 	IsBaseline   bool
 	Label        *string
+	Automatic    bool
 }
 
 type Deployment struct {
@@ -986,6 +1055,8 @@ type DeploymentBranch struct {
 	Name         string
 	Sha          *string
 	Ordinal      int32
+	IssueKey     *string
+	IssueTitle   *string
 }
 
 type DeploymentStage struct {
@@ -1111,12 +1182,14 @@ type OrgMembership struct {
 }
 
 type Organization struct {
-	ID         pgtype.UUID
-	Name       string
-	Slug       string
-	IsPersonal bool
-	CreatedAt  pgtype.Timestamptz
-	UpdatedAt  pgtype.Timestamptz
+	ID               pgtype.UUID
+	Name             string
+	Slug             string
+	IsPersonal       bool
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	AtlassianCloudID *string
+	AtlassianSiteUrl *string
 }
 
 type PrismaMigration struct {
@@ -1228,6 +1301,8 @@ type VolumeBackup struct {
 	Label         *string
 	CreatedAt     pgtype.Timestamptz
 	CompletedAt   pgtype.Timestamptz
+	Automatic     bool
+	IsBaseline    bool
 }
 
 type WebhookDelivery struct {

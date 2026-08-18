@@ -12,7 +12,7 @@ import (
 )
 
 const getVolumeBackup = `-- name: GetVolumeBackup :one
-SELECT id, environment_id, volume_name, status, storage_key, size_bytes, error_summary, label, created_at, completed_at
+SELECT id, environment_id, volume_name, status, storage_key, size_bytes, error_summary, label, created_at, completed_at, automatic, is_baseline
 FROM volume_backups
 WHERE id = $1
 `
@@ -31,6 +31,8 @@ func (q *Queries) GetVolumeBackup(ctx context.Context, id pgtype.UUID) (VolumeBa
 		&i.Label,
 		&i.CreatedAt,
 		&i.CompletedAt,
+		&i.Automatic,
+		&i.IsBaseline,
 	)
 	return i, err
 }

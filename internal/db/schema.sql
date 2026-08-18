@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict upZAuqjSGdC34tuTntAIjyPomSILz0Y3vfM2HJ5OsNmF4l8OVbwIsxVqNNSrMIc
+\restrict ZLKdLt2H0GLfucHJ8RzD6mrnz2ZfS3bDKtMcqUzTFpHvdBF5dRTs9kpxbFSyyF1
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -362,7 +362,9 @@ CREATE TABLE public.deployment_branches (
     role public."DeploymentBranchRole" NOT NULL,
     name text NOT NULL,
     sha text,
-    ordinal integer NOT NULL
+    ordinal integer NOT NULL,
+    issue_key text,
+    issue_title text
 );
 
 
@@ -589,7 +591,9 @@ CREATE TABLE public.organizations (
     slug text NOT NULL,
     is_personal boolean DEFAULT false NOT NULL,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) with time zone NOT NULL
+    updated_at timestamp(3) with time zone NOT NULL,
+    atlassian_cloud_id text,
+    atlassian_site_url text
 );
 
 
@@ -1524,5 +1528,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict upZAuqjSGdC34tuTntAIjyPomSILz0Y3vfM2HJ5OsNmF4l8OVbwIsxVqNNSrMIc
+\unrestrict ZLKdLt2H0GLfucHJ8RzD6mrnz2ZfS3bDKtMcqUzTFpHvdBF5dRTs9kpxbFSyyF1
 
