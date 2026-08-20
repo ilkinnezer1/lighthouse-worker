@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ZLKdLt2H0GLfucHJ8RzD6mrnz2ZfS3bDKtMcqUzTFpHvdBF5dRTs9kpxbFSyyF1
+\restrict mEd1RFjJniHzpqAef1arkiTAuwTogOIgg5MRUSH9vqhBkjbiVwpDcIMBoEgZEBf
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -26,24 +26,10 @@ SET row_security = off;
 
 
 --
--- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON SCHEMA public IS '';
-
-
---
 -- Name: citext; Type: EXTENSION; Schema: -; Owner: -
 --
 
 CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
-
-
---
--- Name: EXTENSION citext; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION citext IS 'data type for case-insensitive character strings';
 
 
 --
@@ -424,7 +410,11 @@ CREATE TABLE public.environments (
     active boolean DEFAULT true NOT NULL,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
-    pr_number integer
+    pr_number integer,
+    lock_expires_at timestamp(3) with time zone,
+    lock_reason text,
+    locked_at timestamp(3) with time zone,
+    locked_by_user_id uuid
 );
 
 
@@ -547,6 +537,24 @@ CREATE TABLE public.notification_deliveries (
     next_attempt_at timestamp(3) with time zone,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     sent_at timestamp(3) with time zone
+);
+
+
+--
+-- Name: notifications; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notifications (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    kind text NOT NULL,
+    title text NOT NULL,
+    body text,
+    link text,
+    context jsonb,
+    dedupe_key text NOT NULL,
+    read_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
 
@@ -875,6 +883,14 @@ ALTER TABLE ONLY public.notification_deliveries
 
 
 --
+-- Name: notifications notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notifications
+    ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: org_invitations org_invitations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1054,6 +1070,13 @@ CREATE UNIQUE INDEX environments_custom_domain_key ON public.environments USING 
 
 
 --
+-- Name: environments_locked_by_user_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX environments_locked_by_user_id_idx ON public.environments USING btree (locked_by_user_id);
+
+
+--
 -- Name: environments_project_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1121,6 +1144,27 @@ CREATE UNIQUE INDEX notification_deliveries_event_id_channel_id_key ON public.no
 --
 
 CREATE INDEX notification_deliveries_status_next_attempt_at_idx ON public.notification_deliveries USING btree (status, next_attempt_at);
+
+
+--
+-- Name: notifications_user_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_user_id_created_at_idx ON public.notifications USING btree (user_id, created_at DESC);
+
+
+--
+-- Name: notifications_user_id_dedupe_key_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX notifications_user_id_dedupe_key_key ON public.notifications USING btree (user_id, dedupe_key);
+
+
+--
+-- Name: notifications_user_id_read_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notifications_user_id_read_at_idx ON public.notifications USING btree (user_id) WHERE (read_at IS NULL);
 
 
 --
@@ -1357,6 +1401,14 @@ ALTER TABLE ONLY public.deployments
 
 
 --
+-- Name: environments environments_locked_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.environments
+    ADD CONSTRAINT environments_locked_by_user_id_fkey FOREIGN KEY (locked_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
 -- Name: environments environments_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1426,6 +1478,14 @@ ALTER TABLE ONLY public.notification_channels
 
 ALTER TABLE ONLY public.notification_deliveries
     ADD CONSTRAINT notification_deliveries_channel_id_fkey FOREIGN KEY (channel_id) REFERENCES public.notification_channels(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: notifications notifications_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notifications
+    ADD CONSTRAINT notifications_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -1528,5 +1588,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ZLKdLt2H0GLfucHJ8RzD6mrnz2ZfS3bDKtMcqUzTFpHvdBF5dRTs9kpxbFSyyF1
+\unrestrict mEd1RFjJniHzpqAef1arkiTAuwTogOIgg5MRUSH9vqhBkjbiVwpDcIMBoEgZEBf
 

@@ -1073,18 +1073,22 @@ type DeploymentStage struct {
 }
 
 type Environment struct {
-	ID           pgtype.UUID
-	ProjectID    pgtype.UUID
-	Name         string
-	Type         EnvironmentType
-	Branch       *string
-	Subdomain    string
-	CustomDomain *string
-	EnvVarsEnc   *string
-	Active       bool
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	PrNumber     *int32
+	ID             pgtype.UUID
+	ProjectID      pgtype.UUID
+	Name           string
+	Type           EnvironmentType
+	Branch         *string
+	Subdomain      string
+	CustomDomain   *string
+	EnvVarsEnc     *string
+	Active         bool
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	PrNumber       *int32
+	LockExpiresAt  pgtype.Timestamptz
+	LockReason     *string
+	LockedAt       pgtype.Timestamptz
+	LockedByUserID pgtype.UUID
 }
 
 type EventOutbox struct {
@@ -1133,6 +1137,19 @@ type ManagedFile struct {
 	ContentEnc    string
 	CreatedAt     pgtype.Timestamptz
 	UpdatedAt     pgtype.Timestamptz
+}
+
+type Notification struct {
+	ID        pgtype.UUID
+	UserID    pgtype.UUID
+	Kind      string
+	Title     string
+	Body      *string
+	Link      *string
+	Context   []byte
+	DedupeKey string
+	ReadAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
 }
 
 type NotificationChannel struct {
