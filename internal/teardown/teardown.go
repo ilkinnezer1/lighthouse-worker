@@ -7,8 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -163,10 +161,24 @@ func (r *Runner) removeImage(ctx context.Context, log *slog.Logger, s dbgen.Serv
 	}
 }
 
+// Build containers bind-mount the work dir and write root-owned node_modules /
+// vendor into it, so a worker running as an ordinary user gets EPERM here and
+// must say so rather than leaving gigabytes behind under a warning.
 func (r *Runner) removeWorkDir(log *slog.Logger, deploymentID string) {
-	dir := filepath.Join(r.workDirBase, deploymentID)
-	if err := os.RemoveAll(dir); err != nil {
-		log.Warn("workdir remove failed", slog.String("path", dir), slog.Any("err", err))
+	freed, residual, err := stages.ReclaimWorkDir(r.workDirBase, deploymentID)
+	if err != nil {
+		log.Warn("workdir not reclaimed",
+			slog.String("deploymentId", deploymentID),
+			slog.String("residual", stages.HumanBytes(residual)),
+			slog.Any("err", err),
+		)
+		return
+	}
+	if freed > 0 {
+		log.Info("workdir reclaimed",
+			slog.String("deploymentId", deploymentID),
+			slog.String("freed", stages.HumanBytes(freed)),
+		)
 	}
 }
 

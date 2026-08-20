@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
@@ -17,13 +16,14 @@ import (
 // reaches this stage and the previous one keeps serving. Best-effort: it must
 // never fail a deploy that is already live and healthy.
 type Retire struct {
-	docker *client.Client
-	q      *dbgen.Queries
-	logs   *logstream.Writer
+	docker      *client.Client
+	q           *dbgen.Queries
+	logs        *logstream.Writer
+	workDirBase string
 }
 
-func NewRetire(docker *client.Client, q *dbgen.Queries, logs *logstream.Writer) *Retire {
-	return &Retire{docker: docker, q: q, logs: logs}
+func NewRetire(docker *client.Client, q *dbgen.Queries, logs *logstream.Writer, workDirBase string) *Retire {
+	return &Retire{docker: docker, q: q, logs: logs, workDirBase: workDirBase}
 }
 
 func (*Retire) Name() string { return "retire_old_deployment" }
@@ -41,7 +41,7 @@ func (r *Retire) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	}
 	for _, d := range prior {
 		oldID := db.UUIDString(d.ID)
-		if oldID == dep.ID {
+		if oldID == "" || oldID == dep.ID {
 			continue
 		}
 		r.remove(ctx, dep.ID, oldID)
@@ -49,16 +49,30 @@ func (r *Retire) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	return nil
 }
 
-// remove force-removes a prior deployment's containers and networks, covering
-// both strategies: compose resources by project label, plus the Dockerfile
-// single container deploy-<id>. Best-effort — errors are ignored.
+// remove reclaims a prior deployment's containers, images and work tree. The
+// service rows name the images to remove, so they are read before the delete.
 func (r *Retire) remove(ctx context.Context, curID, oldID string) {
-	_ = removeComposeResources(ctx, r.docker, oldID)
-	_ = r.docker.ContainerRemove(ctx, containerName(oldID), container.RemoveOptions{Force: true})
-	if id, err := db.ParseUUID(oldID); err == nil {
-		_ = r.q.DeleteServicesByDeployment(ctx, id)
+	oldUUID, err := db.ParseUUID(oldID)
+	if err != nil {
+		return
 	}
-	r.logLine(ctx, curID, "superseded previous deployment "+oldID)
+	svcs, err := r.q.ListServicesByDeployment(ctx, oldUUID)
+	if err != nil {
+		r.logLine(ctx, curID, "retire: list services for "+oldID+": "+err.Error())
+	}
+	recorded := make([]string, 0, len(svcs))
+	for _, s := range svcs {
+		if s.Image != nil {
+			recorded = append(recorded, *s.Image)
+		}
+	}
+
+	freed := ReclaimDeployment(ctx, r.docker, r.workDirBase, oldID, recorded)
+	// Rows outlive a partial reclaim so the next sweep can still find the images.
+	if freed.Complete() {
+		_ = r.q.DeleteServicesByDeployment(ctx, oldUUID)
+	}
+	r.logLine(ctx, curID, "superseded previous deployment "+oldID+" — "+freed.Summary())
 }
 
 func (*Retire) Rollback(context.Context, *pipeline.Deployment) error { return nil }

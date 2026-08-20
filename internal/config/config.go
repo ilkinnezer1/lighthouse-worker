@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/joho/godotenv"
+
+	"github.com/ilkinnezer1/lighthouse-worker/internal/sweeper"
 )
 
 type Config struct {
@@ -22,11 +25,14 @@ type Config struct {
 	MinIOAccessKey      string
 	MinIOSecretKey      string
 	MinIOBucket         string
+	SweepInterval       time.Duration
+	SweepRetention      time.Duration
 }
 
 func Load() (*Config, error) {
 	_ = godotenv.Load()
 
+	var err error
 	cfg := &Config{
 		DatabaseURL:         os.Getenv("DATABASE_URL"),
 		RedisURL:            os.Getenv("REDIS_URL"),
@@ -40,6 +46,13 @@ func Load() (*Config, error) {
 		MinIOAccessKey:      os.Getenv("MINIO_ACCESS_KEY"),
 		MinIOSecretKey:      os.Getenv("MINIO_SECRET_KEY"),
 		MinIOBucket:         getEnv("MINIO_BUCKET", "snapshots"),
+	}
+
+	if cfg.SweepInterval, err = getDuration("SWEEP_INTERVAL", sweeper.DefaultInterval); err != nil {
+		return nil, err
+	}
+	if cfg.SweepRetention, err = getDuration("SWEEP_RETENTION", sweeper.DefaultRetention); err != nil {
+		return nil, err
 	}
 
 	var missing []string
@@ -78,4 +91,19 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getDuration(key string, fallback time.Duration) (time.Duration, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a duration like 168h: %w", key, err)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("%s must be positive, got %s", key, raw)
+	}
+	return d, nil
 }

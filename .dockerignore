@@ -1,0 +1,12 @@
+data/
+bin/
+.git/
+.github/
+.idea/
+.vscode/
+.claude/
+.env
+*.test
+*.out
+Dockerfile
+.dockerignore
