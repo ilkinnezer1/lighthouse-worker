@@ -55,6 +55,11 @@ linters:
       - path: internal/stages/retire\.go
         linters:
           - nilerr
+      # dirSize sums what it can read: an unreadable entry (the root-owned
+      # node_modules a build container left behind) must not abort the walk.
+      - path: internal/stages/reclaim\.go
+        linters:
+          - nilerr
       # A cancelled context is a clean consumer shutdown, not a failure; nilerr
       # cannot tell that ctx.Err() differs from a real error.
       - path: internal/queue/consumer\.go

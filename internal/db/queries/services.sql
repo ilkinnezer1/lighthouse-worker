@@ -39,3 +39,8 @@ WHERE id = $1;
 -- name: DeleteServicesByDeployment :exec
 DELETE FROM services
 WHERE deployment_id = $1;
+
+-- name: ListServicesByDeployment :many
+SELECT id, name, image, container_id
+FROM services
+WHERE deployment_id = $1;

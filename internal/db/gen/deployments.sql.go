@@ -259,6 +259,52 @@ func (q *Queries) ListManagedFilesByEnvironment(ctx context.Context, environment
 	return items, nil
 }
 
+const listReclaimableDeployments = `-- name: ListReclaimableDeployments :many
+SELECT d.id, d.environment_id, d.status, d.created_at
+FROM deployments d
+WHERE d.status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+  AND d.created_at < $1
+  AND NOT EXISTS (SELECT 1
+                  FROM (SELECT DISTINCT ON (environment_id) id
+                        FROM deployments
+                        WHERE status = 'SUCCEEDED'
+                        ORDER BY environment_id, created_at DESC) live
+                  WHERE live.id = d.id)
+ORDER BY d.created_at
+`
+
+type ListReclaimableDeploymentsRow struct {
+	ID            pgtype.UUID
+	EnvironmentID pgtype.UUID
+	Status        DeploymentStatus
+	CreatedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) ListReclaimableDeployments(ctx context.Context, createdAt pgtype.Timestamptz) ([]ListReclaimableDeploymentsRow, error) {
+	rows, err := q.db.Query(ctx, listReclaimableDeployments, createdAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReclaimableDeploymentsRow
+	for rows.Next() {
+		var i ListReclaimableDeploymentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnvironmentID,
+			&i.Status,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const startDeployment = `-- name: StartDeployment :exec
 UPDATE deployments
 SET status     = 'CLONING',

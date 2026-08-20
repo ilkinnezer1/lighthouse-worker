@@ -94,3 +94,15 @@ SELECT path, content_enc
 FROM managed_files
 WHERE environment_id = $1
 ORDER BY path;
+-- name: ListReclaimableDeployments :many
+SELECT d.id, d.environment_id, d.status, d.created_at
+FROM deployments d
+WHERE d.status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+  AND d.created_at < $1
+  AND NOT EXISTS (SELECT 1
+                  FROM (SELECT DISTINCT ON (environment_id) id
+                        FROM deployments
+                        WHERE status = 'SUCCEEDED'
+                        ORDER BY environment_id, created_at DESC) live
+                  WHERE live.id = d.id)
+ORDER BY d.created_at;

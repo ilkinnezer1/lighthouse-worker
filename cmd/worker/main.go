@@ -27,6 +27,7 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/redisx"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/routing"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/sweeper"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/teardown"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/volumebackup"
 )
@@ -98,7 +99,7 @@ func run() int {
 		stages.NewBuild(logs),
 		stages.NewRun(docker, logs, q, cipher, mode),
 		stages.NewHealthCheck(docker, q, logs),
-		stages.NewRetire(docker, q, logs),
+		stages.NewRetire(docker, q, logs, cfg.WorkDir),
 	}
 	cancelListener := cancelbus.New(rdb, root)
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
@@ -140,6 +141,8 @@ func run() int {
 		LogLabel: "Queue.volumeBackup",
 	}, volumeBackupRouter.Route)
 
+	diskSweeper := sweeper.New(docker, q, root, cfg.WorkDir, cfg.SweepInterval, cfg.SweepRetention)
+
 	boot.Info("ready")
 
 	g, gCtx := errgroup.WithContext(ctx)
@@ -148,6 +151,7 @@ func run() int {
 	g.Go(func() error { return teardownConsumer.Run(gCtx) })
 	g.Go(func() error { return databaseConsumer.Run(gCtx) })
 	g.Go(func() error { return volumeBackupConsumer.Run(gCtx) })
+	g.Go(func() error { return diskSweeper.Run(gCtx) })
 
 	if err := g.Wait(); err != nil {
 		boot.Error("stopped with error", slog.Any("err", err))
