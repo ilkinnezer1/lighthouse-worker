@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict mEd1RFjJniHzpqAef1arkiTAuwTogOIgg5MRUSH9vqhBkjbiVwpDcIMBoEgZEBf
+\restrict HaYOCs8uJeoWMiuUL2DsuukJxFCbBNXGuJejxttsglxiKCyUnBfepVbp8RClnMh
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -130,6 +130,17 @@ CREATE TYPE public."EnvironmentType" AS ENUM (
 
 
 --
+-- Name: FindingStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."FindingStatus" AS ENUM (
+    'OPEN',
+    'FIXED',
+    'CANNOT_REPRODUCE'
+);
+
+
+--
 -- Name: GitCredentialKind; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -149,6 +160,16 @@ CREATE TYPE public."IdentityProvider" AS ENUM (
     'GITHUB',
     'GOOGLE',
     'ATLASSIAN'
+);
+
+
+--
+-- Name: LogSnapshotStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."LogSnapshotStatus" AS ENUM (
+    'CAPTURED',
+    'UNAVAILABLE'
 );
 
 
@@ -449,6 +470,28 @@ CREATE SEQUENCE public.event_outbox_id_seq
 --
 
 ALTER SEQUENCE public.event_outbox_id_seq OWNED BY public.event_outbox.id;
+
+
+--
+-- Name: findings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.findings (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    deployment_id uuid NOT NULL,
+    reported_by_user_id uuid,
+    title text NOT NULL,
+    body text,
+    status public."FindingStatus" DEFAULT 'OPEN'::public."FindingStatus" NOT NULL,
+    fixed_by_deployment_id uuid,
+    resolved_by_user_id uuid,
+    resolved_at timestamp(3) with time zone,
+    log_snapshot_status public."LogSnapshotStatus" DEFAULT 'UNAVAILABLE'::public."LogSnapshotStatus" NOT NULL,
+    log_snapshot text,
+    log_snapshot_truncated boolean DEFAULT false NOT NULL,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
 
 
 --
@@ -843,6 +886,14 @@ ALTER TABLE ONLY public.event_outbox
 
 
 --
+-- Name: findings findings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.findings
+    ADD CONSTRAINT findings_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: git_credentials git_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1095,6 +1146,20 @@ CREATE UNIQUE INDEX environments_project_id_name_key ON public.environments USIN
 --
 
 CREATE INDEX event_outbox_drained_at_idx ON public.event_outbox USING btree (drained_at) WHERE (drained_at IS NULL);
+
+
+--
+-- Name: findings_deployment_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX findings_deployment_id_created_at_idx ON public.findings USING btree (deployment_id, created_at DESC);
+
+
+--
+-- Name: findings_deployment_id_status_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX findings_deployment_id_status_idx ON public.findings USING btree (deployment_id) WHERE (status = 'OPEN'::public."FindingStatus");
 
 
 --
@@ -1425,6 +1490,38 @@ ALTER TABLE ONLY public.event_outbox
 
 
 --
+-- Name: findings findings_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.findings
+    ADD CONSTRAINT findings_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: findings findings_fixed_by_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.findings
+    ADD CONSTRAINT findings_fixed_by_deployment_id_fkey FOREIGN KEY (fixed_by_deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: findings findings_reported_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.findings
+    ADD CONSTRAINT findings_reported_by_user_id_fkey FOREIGN KEY (reported_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: findings findings_resolved_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.findings
+    ADD CONSTRAINT findings_resolved_by_user_id_fkey FOREIGN KEY (resolved_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
 -- Name: git_credentials git_credentials_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1588,5 +1685,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict mEd1RFjJniHzpqAef1arkiTAuwTogOIgg5MRUSH9vqhBkjbiVwpDcIMBoEgZEBf
+\unrestrict HaYOCs8uJeoWMiuUL2DsuukJxFCbBNXGuJejxttsglxiKCyUnBfepVbp8RClnMh
 

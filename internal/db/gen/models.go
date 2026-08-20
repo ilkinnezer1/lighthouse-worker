@@ -454,6 +454,59 @@ func (e EnvironmentType) Valid() bool {
 	return false
 }
 
+type FindingStatus string
+
+const (
+	FindingStatusOPEN            FindingStatus = "OPEN"
+	FindingStatusFIXED           FindingStatus = "FIXED"
+	FindingStatusCANNOTREPRODUCE FindingStatus = "CANNOT_REPRODUCE"
+)
+
+func (e *FindingStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FindingStatus(s)
+	case string:
+		*e = FindingStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FindingStatus: %T", src)
+	}
+	return nil
+}
+
+type NullFindingStatus struct {
+	FindingStatus FindingStatus
+	Valid         bool // Valid is true if FindingStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFindingStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.FindingStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FindingStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFindingStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FindingStatus), nil
+}
+
+func (e FindingStatus) Valid() bool {
+	switch e {
+	case FindingStatusOPEN,
+		FindingStatusFIXED,
+		FindingStatusCANNOTREPRODUCE:
+		return true
+	}
+	return false
+}
+
 type GitCredentialKind string
 
 const (
@@ -557,6 +610,57 @@ func (e IdentityProvider) Valid() bool {
 		IdentityProviderGITHUB,
 		IdentityProviderGOOGLE,
 		IdentityProviderATLASSIAN:
+		return true
+	}
+	return false
+}
+
+type LogSnapshotStatus string
+
+const (
+	LogSnapshotStatusCAPTURED    LogSnapshotStatus = "CAPTURED"
+	LogSnapshotStatusUNAVAILABLE LogSnapshotStatus = "UNAVAILABLE"
+)
+
+func (e *LogSnapshotStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = LogSnapshotStatus(s)
+	case string:
+		*e = LogSnapshotStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for LogSnapshotStatus: %T", src)
+	}
+	return nil
+}
+
+type NullLogSnapshotStatus struct {
+	LogSnapshotStatus LogSnapshotStatus
+	Valid             bool // Valid is true if LogSnapshotStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullLogSnapshotStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.LogSnapshotStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.LogSnapshotStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullLogSnapshotStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.LogSnapshotStatus), nil
+}
+
+func (e LogSnapshotStatus) Valid() bool {
+	switch e {
+	case LogSnapshotStatusCAPTURED,
+		LogSnapshotStatusUNAVAILABLE:
 		return true
 	}
 	return false
@@ -1098,6 +1202,23 @@ type EventOutbox struct {
 	Payload   []byte
 	DrainedAt pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+}
+
+type Finding struct {
+	ID                   pgtype.UUID
+	DeploymentID         pgtype.UUID
+	ReportedByUserID     pgtype.UUID
+	Title                string
+	Body                 *string
+	Status               FindingStatus
+	FixedByDeploymentID  pgtype.UUID
+	ResolvedByUserID     pgtype.UUID
+	ResolvedAt           pgtype.Timestamptz
+	LogSnapshotStatus    LogSnapshotStatus
+	LogSnapshot          *string
+	LogSnapshotTruncated bool
+	CreatedAt            pgtype.Timestamptz
+	UpdatedAt            pgtype.Timestamptz
 }
 
 type GitCredential struct {
