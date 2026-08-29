@@ -7,9 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
-	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
-	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/gitauth"
 )
 
 // mergeCheckTimeout bounds the whole probe. It is far shorter than a build's
@@ -24,12 +22,14 @@ type MergeRef struct {
 	Sha  string `json:"sha"`
 }
 
-// MergeCheck asks whether a branch set would combine cleanly.
+// MergeCheck asks whether a branch set would combine cleanly. ProjectID, not a
+// user id: the probe authenticates as the project's organization, exactly as
+// the deploy it is standing in for does.
 type MergeCheck struct {
-	RepoURL string     `json:"repoUrl"`
-	UserID  string     `json:"userId"`
-	Source  MergeRef   `json:"source"`
-	Merges  []MergeRef `json:"merges"`
+	RepoURL   string     `json:"repoUrl"`
+	ProjectID string     `json:"projectId"`
+	Source    MergeRef   `json:"source"`
+	Merges    []MergeRef `json:"merges"`
 }
 
 // MergeCheckResult mirrors what a deploy would do: it stops at the first branch
@@ -50,8 +50,7 @@ type MergeCheckResult struct {
 // Every call pays a full fetch, which is why nothing calls it automatically.
 func CheckMerge(
 	ctx context.Context,
-	q *dbgen.Queries,
-	cipher *crypto.Cipher,
+	auth *gitauth.Resolver,
 	req MergeCheck,
 ) (MergeCheckResult, error) {
 	if req.Source.Sha == "" {
@@ -72,7 +71,11 @@ func CheckMerge(
 	// The probe leaves nothing behind — it exists only to answer one question.
 	defer func() { _ = os.RemoveAll(dir) }()
 
-	remote, _ := authedRemoteForUser(ctx, q, cipher, req.RepoURL, req.UserID)
+	// Degrades to the bare URL exactly as the clone stage does: a public repo
+	// still probes, and a private one surfaces as "could not tell", never as a
+	// conflict.
+	cred, _ := auth.ForProject(ctx, req.ProjectID)
+	remote, _ := authedRemote(req.RepoURL, cred.Token)
 
 	git := func(args ...string) error {
 		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
@@ -131,26 +134,4 @@ func CheckMerge(
 	}
 
 	return MergeCheckResult{Mergeable: true}, nil
-}
-
-// authedRemoteForUser is remoteFor without a Deployment to hang it off — the
-// probe has a repo URL and a user, not a build.
-func authedRemoteForUser(
-	ctx context.Context,
-	q *dbgen.Queries,
-	cipher *crypto.Cipher,
-	repoURL, userID string,
-) (remote, logSafe string) {
-	if userID == "" {
-		return repoURL, repoURL
-	}
-	enc, err := q.GetGithubTokenForUser(ctx, db.MustUUID(userID))
-	if err != nil || enc == nil {
-		return repoURL, repoURL
-	}
-	token, err := cipher.Decrypt(*enc)
-	if err != nil {
-		return repoURL, repoURL
-	}
-	return authedRemote(repoURL, token)
 }

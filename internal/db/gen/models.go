@@ -63,6 +63,108 @@ func (e BackupTargetKind) Valid() bool {
 	return false
 }
 
+type CheckResult string
+
+const (
+	CheckResultPASS CheckResult = "PASS"
+	CheckResultFAIL CheckResult = "FAIL"
+)
+
+func (e *CheckResult) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CheckResult(s)
+	case string:
+		*e = CheckResult(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CheckResult: %T", src)
+	}
+	return nil
+}
+
+type NullCheckResult struct {
+	CheckResult CheckResult
+	Valid       bool // Valid is true if CheckResult is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCheckResult) Scan(value interface{}) error {
+	if value == nil {
+		ns.CheckResult, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CheckResult.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCheckResult) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CheckResult), nil
+}
+
+func (e CheckResult) Valid() bool {
+	switch e {
+	case CheckResultPASS,
+		CheckResultFAIL:
+		return true
+	}
+	return false
+}
+
+type ChecklistItemSource string
+
+const (
+	ChecklistItemSourceSEEDED ChecklistItemSource = "SEEDED"
+	ChecklistItemSourceMANUAL ChecklistItemSource = "MANUAL"
+)
+
+func (e *ChecklistItemSource) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ChecklistItemSource(s)
+	case string:
+		*e = ChecklistItemSource(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ChecklistItemSource: %T", src)
+	}
+	return nil
+}
+
+type NullChecklistItemSource struct {
+	ChecklistItemSource ChecklistItemSource
+	Valid               bool // Valid is true if ChecklistItemSource is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullChecklistItemSource) Scan(value interface{}) error {
+	if value == nil {
+		ns.ChecklistItemSource, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ChecklistItemSource.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullChecklistItemSource) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ChecklistItemSource), nil
+}
+
+func (e ChecklistItemSource) Valid() bool {
+	switch e {
+	case ChecklistItemSourceSEEDED,
+		ChecklistItemSourceMANUAL:
+		return true
+	}
+	return false
+}
+
 type DatabaseStatus string
 
 const (
@@ -1122,6 +1224,30 @@ type BackupSchedule struct {
 	UpdatedAt     pgtype.Timestamptz
 }
 
+type ChecklistCheck struct {
+	ID              pgtype.UUID
+	ItemID          pgtype.UUID
+	DeploymentID    pgtype.UUID
+	Result          CheckResult
+	Note            *string
+	CheckedByUserID pgtype.UUID
+	FindingID       pgtype.UUID
+	CreatedAt       pgtype.Timestamptz
+}
+
+type ChecklistItem struct {
+	ID              pgtype.UUID
+	EnvironmentID   pgtype.UUID
+	Title           string
+	Source          ChecklistItemSource
+	IssueKey        *string
+	IssueUrl        *string
+	SeedKey         *string
+	CreatedByUserID pgtype.UUID
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
 type DatabaseSnapshot struct {
 	ID           pgtype.UUID
 	DatabaseID   pgtype.UUID
@@ -1177,22 +1303,27 @@ type DeploymentStage struct {
 }
 
 type Environment struct {
-	ID             pgtype.UUID
-	ProjectID      pgtype.UUID
-	Name           string
-	Type           EnvironmentType
-	Branch         *string
-	Subdomain      string
-	CustomDomain   *string
-	EnvVarsEnc     *string
-	Active         bool
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	PrNumber       *int32
-	LockExpiresAt  pgtype.Timestamptz
-	LockReason     *string
-	LockedAt       pgtype.Timestamptz
-	LockedByUserID pgtype.UUID
+	ID                 pgtype.UUID
+	ProjectID          pgtype.UUID
+	Name               string
+	Type               EnvironmentType
+	Branch             *string
+	Subdomain          string
+	CustomDomain       *string
+	EnvVarsEnc         *string
+	Active             bool
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+	PrNumber           *int32
+	LockExpiresAt      pgtype.Timestamptz
+	LockReason         *string
+	LockedAt           pgtype.Timestamptz
+	LockedByUserID     pgtype.UUID
+	HibernationEnabled bool
+	IdleTimeoutMinutes int32
+	LastRequestCount   *int64
+	LastActivityAt     pgtype.Timestamptz
+	HibernatedAt       pgtype.Timestamptz
 }
 
 type EventOutbox struct {
@@ -1222,14 +1353,17 @@ type Finding struct {
 }
 
 type GitCredential struct {
-	ID          pgtype.UUID
-	UserID      pgtype.UUID
-	Kind        GitCredentialKind
-	Label       *string
-	SecretEnc   string
-	Fingerprint *string
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	Kind           GitCredentialKind
+	Label          *string
+	SecretEnc      string
+	Fingerprint    *string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	Login          *string
+	Scopes         []string
+	OrganizationID pgtype.UUID
 }
 
 type ManagedDatabase struct {
@@ -1320,14 +1454,15 @@ type OrgMembership struct {
 }
 
 type Organization struct {
-	ID               pgtype.UUID
-	Name             string
-	Slug             string
-	IsPersonal       bool
-	CreatedAt        pgtype.Timestamptz
-	UpdatedAt        pgtype.Timestamptz
-	AtlassianCloudID *string
-	AtlassianSiteUrl *string
+	ID                        pgtype.UUID
+	Name                      string
+	Slug                      string
+	IsPersonal                bool
+	CreatedAt                 pgtype.Timestamptz
+	UpdatedAt                 pgtype.Timestamptz
+	AtlassianCloudID          *string
+	AtlassianSiteUrl          *string
+	AllowMemberGitCredentials bool
 }
 
 type PrismaMigration struct {

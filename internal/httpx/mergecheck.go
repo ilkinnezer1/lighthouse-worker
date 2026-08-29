@@ -5,15 +5,14 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
-	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/gitauth"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/stages"
 )
 
 // mergeCheck answers whether a branch set would combine cleanly, before anyone
 // spends a build finding out. Nest resolves the branch names to shas and proxies
 // here; the worker is the only side that can run git.
-func mergeCheck(q *dbgen.Queries, cipher *crypto.Cipher, log *slog.Logger) http.HandlerFunc {
+func mergeCheck(auth *gitauth.Resolver, log *slog.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req stages.MergeCheck
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -25,7 +24,7 @@ func mergeCheck(q *dbgen.Queries, cipher *crypto.Cipher, log *slog.Logger) http.
 			return
 		}
 
-		result, err := stages.CheckMerge(r.Context(), q, cipher, req)
+		result, err := stages.CheckMerge(r.Context(), auth, req)
 		if err != nil {
 			// A probe that could not run is not a conflict, and must not be
 			// reported as one — the caller says "could not tell".

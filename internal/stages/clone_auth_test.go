@@ -33,3 +33,20 @@ func TestAuthedRemote(t *testing.T) {
 		t.Fatalf("non-https (http) must be unchanged: %q", r)
 	}
 }
+
+func TestIsGitHubHTTPS(t *testing.T) {
+	cases := map[string]bool{
+		"https://github.com/acme/app.git":   true,
+		"https://GitHub.com/acme/app.git":   true,
+		"http://github.com/acme/app.git":    false,
+		"git@github.com:acme/app.git":       false,
+		"https://gitlab.com/acme/app.git":   false,
+		"https://git.acme.internal/a/b.git": false,
+		"":                                  false,
+	}
+	for url, want := range cases {
+		if got := isGitHubHTTPS(url); got != want {
+			t.Errorf("isGitHubHTTPS(%q) = %v, want %v", url, got, want)
+		}
+	}
+}

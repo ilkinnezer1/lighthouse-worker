@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict HaYOCs8uJeoWMiuUL2DsuukJxFCbBNXGuJejxttsglxiKCyUnBfepVbp8RClnMh
+\restrict lBkmy3DCl9uhZTxUqc5Rqhqyns8XLARUZgf6O8kHmIOJognrhV4iDI1PGg5C0H5
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -39,6 +39,26 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE TYPE public."BackupTargetKind" AS ENUM (
     'DATABASE',
     'VOLUME'
+);
+
+
+--
+-- Name: CheckResult; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."CheckResult" AS ENUM (
+    'PASS',
+    'FAIL'
+);
+
+
+--
+-- Name: ChecklistItemSource; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ChecklistItemSource" AS ENUM (
+    'SEEDED',
+    'MANUAL'
 );
 
 
@@ -262,6 +282,20 @@ CREATE TYPE public."UserRole" AS ENUM (
 );
 
 
+--
+-- Name: delete_personal_git_credentials(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.delete_personal_git_credentials() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  DELETE FROM git_credentials WHERE user_id = OLD.id AND organization_id IS NULL;
+  RETURN OLD;
+END;
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -336,6 +370,40 @@ CREATE TABLE public.backup_schedules (
     created_by_id uuid NOT NULL,
     last_run_at timestamp(3) with time zone,
     next_run_at timestamp(3) with time zone,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
+-- Name: checklist_checks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checklist_checks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    item_id uuid NOT NULL,
+    deployment_id uuid NOT NULL,
+    result public."CheckResult" NOT NULL,
+    note text,
+    checked_by_user_id uuid,
+    finding_id uuid,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: checklist_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checklist_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    title text NOT NULL,
+    source public."ChecklistItemSource" DEFAULT 'MANUAL'::public."ChecklistItemSource" NOT NULL,
+    issue_key text,
+    issue_url text,
+    seed_key text,
+    created_by_user_id uuid,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL
 );
@@ -435,7 +503,12 @@ CREATE TABLE public.environments (
     lock_expires_at timestamp(3) with time zone,
     lock_reason text,
     locked_at timestamp(3) with time zone,
-    locked_by_user_id uuid
+    locked_by_user_id uuid,
+    hibernation_enabled boolean DEFAULT false NOT NULL,
+    idle_timeout_minutes integer DEFAULT 240 NOT NULL,
+    last_request_count bigint,
+    last_activity_at timestamp(3) with time zone,
+    hibernated_at timestamp(3) with time zone
 );
 
 
@@ -500,13 +573,17 @@ CREATE TABLE public.findings (
 
 CREATE TABLE public.git_credentials (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    user_id uuid NOT NULL,
+    user_id uuid,
     kind public."GitCredentialKind" NOT NULL,
     label text,
     secret_enc text NOT NULL,
     fingerprint text,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) with time zone NOT NULL
+    updated_at timestamp(3) with time zone NOT NULL,
+    login text,
+    scopes text[] DEFAULT ARRAY[]::text[],
+    organization_id uuid,
+    CONSTRAINT git_credentials_owner_present CHECK (((organization_id IS NOT NULL) OR (user_id IS NOT NULL)))
 );
 
 
@@ -644,7 +721,8 @@ CREATE TABLE public.organizations (
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
     atlassian_cloud_id text,
-    atlassian_site_url text
+    atlassian_site_url text,
+    allow_member_git_credentials boolean DEFAULT true NOT NULL
 );
 
 
@@ -835,6 +913,22 @@ ALTER TABLE ONLY public.audit_log
 
 ALTER TABLE ONLY public.backup_schedules
     ADD CONSTRAINT backup_schedules_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: checklist_checks checklist_checks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: checklist_items checklist_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_items
+    ADD CONSTRAINT checklist_items_pkey PRIMARY KEY (id);
 
 
 --
@@ -1058,6 +1152,34 @@ CREATE UNIQUE INDEX backup_schedules_environment_id_volume_name_key ON public.ba
 
 
 --
+-- Name: checklist_checks_deployment_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX checklist_checks_deployment_id_idx ON public.checklist_checks USING btree (deployment_id);
+
+
+--
+-- Name: checklist_checks_item_id_deployment_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX checklist_checks_item_id_deployment_id_key ON public.checklist_checks USING btree (item_id, deployment_id);
+
+
+--
+-- Name: checklist_items_environment_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX checklist_items_environment_id_created_at_idx ON public.checklist_items USING btree (environment_id, created_at);
+
+
+--
+-- Name: checklist_items_environment_id_seed_key_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX checklist_items_environment_id_seed_key_key ON public.checklist_items USING btree (environment_id, seed_key) WHERE (seed_key IS NOT NULL);
+
+
+--
 -- Name: database_snapshots_database_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1160,6 +1282,13 @@ CREATE INDEX findings_deployment_id_created_at_idx ON public.findings USING btre
 --
 
 CREATE INDEX findings_deployment_id_status_idx ON public.findings USING btree (deployment_id) WHERE (status = 'OPEN'::public."FindingStatus");
+
+
+--
+-- Name: git_credentials_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX git_credentials_organization_id_idx ON public.git_credentials USING btree (organization_id);
 
 
 --
@@ -1394,6 +1523,13 @@ CREATE UNIQUE INDEX webhook_deliveries_provider_delivery_id_key ON public.webhoo
 
 
 --
+-- Name: users users_delete_personal_git_credentials; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER users_delete_personal_git_credentials BEFORE DELETE ON public.users FOR EACH ROW EXECUTE FUNCTION public.delete_personal_git_credentials();
+
+
+--
 -- Name: audit_log audit_log_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1423,6 +1559,54 @@ ALTER TABLE ONLY public.backup_schedules
 
 ALTER TABLE ONLY public.backup_schedules
     ADD CONSTRAINT backup_schedules_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: checklist_checks checklist_checks_checked_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_checked_by_user_id_fkey FOREIGN KEY (checked_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: checklist_checks checklist_checks_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: checklist_checks checklist_checks_finding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_finding_id_fkey FOREIGN KEY (finding_id) REFERENCES public.findings(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: checklist_checks checklist_checks_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.checklist_items(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: checklist_items checklist_items_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_items
+    ADD CONSTRAINT checklist_items_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: checklist_items checklist_items_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_items
+    ADD CONSTRAINT checklist_items_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --
@@ -1522,11 +1706,19 @@ ALTER TABLE ONLY public.findings
 
 
 --
+-- Name: git_credentials git_credentials_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.git_credentials
+    ADD CONSTRAINT git_credentials_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: git_credentials git_credentials_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.git_credentials
-    ADD CONSTRAINT git_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT git_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 
 --
@@ -1685,5 +1877,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict HaYOCs8uJeoWMiuUL2DsuukJxFCbBNXGuJejxttsglxiKCyUnBfepVbp8RClnMh
+\unrestrict lBkmy3DCl9uhZTxUqc5Rqhqyns8XLARUZgf6O8kHmIOJognrhV4iDI1PGg5C0H5
 

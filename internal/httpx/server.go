@@ -10,8 +10,8 @@ import (
 
 	"github.com/docker/docker/client"
 
-	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/gitauth"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 )
 
@@ -20,7 +20,7 @@ type Server struct {
 	log *slog.Logger
 }
 
-func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries, cipher *crypto.Cipher, workDir string) *Server {
+func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries, auth *gitauth.Resolver, workDir string) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -37,7 +37,7 @@ func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries,
 	mux.HandleFunc("GET /databases/state", databaseStates(docker, logger.Ctx(log, "DatabaseState")))
 	mux.HandleFunc("GET /environments/{id}/volumes", environmentVolumes(docker, logger.Ctx(log, "Volumes")))
 	mux.HandleFunc("DELETE /environments/{id}/volumes/{name}", deleteEnvironmentVolume(docker, logger.Ctx(log, "Volumes")))
-	mux.HandleFunc("POST /merge-check", mergeCheck(q, cipher, logger.Ctx(log, "MergeCheck")))
+	mux.HandleFunc("POST /merge-check", mergeCheck(auth, logger.Ctx(log, "MergeCheck")))
 	mux.HandleFunc("GET /deployments/{id}/files/tree", filesTree(workDir, logger.Ctx(log, "FilesTree")))
 	mux.HandleFunc("GET /deployments/{id}/files/content", filesContent(workDir, logger.Ctx(log, "FilesContent")))
 

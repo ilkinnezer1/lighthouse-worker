@@ -12,11 +12,18 @@ import (
 // the ONLY representation that may ever reach a build log — the token must not.
 func authedRemote(repoURL, token string) (remote, logSafe string) {
 	u, err := url.Parse(repoURL)
-	if err != nil || token == "" || u.Scheme != "https" || u.Hostname() != "github.com" {
+	if err != nil || token == "" || !isGitHubHTTPS(repoURL) {
 		return repoURL, repoURL
 	}
 	u.User = url.UserPassword("x-access-token", token)
 	remote = u.String()
 	logSafe = strings.Replace(remote, u.User.String(), "x-access-token:***", 1)
 	return remote, logSafe
+}
+
+// isGitHubHTTPS gates both token injection and the "no credential" notice, so a
+// self-hosted or SSH remote is never told it is missing a GitHub credential.
+func isGitHubHTTPS(repoURL string) bool {
+	u, err := url.Parse(repoURL)
+	return err == nil && u.Scheme == "https" && strings.EqualFold(u.Hostname(), "github.com")
 }
