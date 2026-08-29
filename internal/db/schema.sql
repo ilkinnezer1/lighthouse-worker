@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict HaYOCs8uJeoWMiuUL2DsuukJxFCbBNXGuJejxttsglxiKCyUnBfepVbp8RClnMh
+\restrict 0WcjkH9AEnScuPci8tuqLBZFD24wrM4M6FIeEOadihqUl8CwJs06KCLkni3zKfK
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -39,6 +39,26 @@ CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
 CREATE TYPE public."BackupTargetKind" AS ENUM (
     'DATABASE',
     'VOLUME'
+);
+
+
+--
+-- Name: CheckResult; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."CheckResult" AS ENUM (
+    'PASS',
+    'FAIL'
+);
+
+
+--
+-- Name: ChecklistItemSource; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ChecklistItemSource" AS ENUM (
+    'SEEDED',
+    'MANUAL'
 );
 
 
@@ -342,6 +362,40 @@ CREATE TABLE public.backup_schedules (
 
 
 --
+-- Name: checklist_checks; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checklist_checks (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    item_id uuid NOT NULL,
+    deployment_id uuid NOT NULL,
+    result public."CheckResult" NOT NULL,
+    note text,
+    checked_by_user_id uuid,
+    finding_id uuid,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+--
+-- Name: checklist_items; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.checklist_items (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    environment_id uuid NOT NULL,
+    title text NOT NULL,
+    source public."ChecklistItemSource" DEFAULT 'MANUAL'::public."ChecklistItemSource" NOT NULL,
+    issue_key text,
+    issue_url text,
+    seed_key text,
+    created_by_user_id uuid,
+    created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) with time zone NOT NULL
+);
+
+
+--
 -- Name: database_snapshots; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -435,7 +489,12 @@ CREATE TABLE public.environments (
     lock_expires_at timestamp(3) with time zone,
     lock_reason text,
     locked_at timestamp(3) with time zone,
-    locked_by_user_id uuid
+    locked_by_user_id uuid,
+    hibernation_enabled boolean DEFAULT false NOT NULL,
+    idle_timeout_minutes integer DEFAULT 240 NOT NULL,
+    last_request_count bigint,
+    last_activity_at timestamp(3) with time zone,
+    hibernated_at timestamp(3) with time zone
 );
 
 
@@ -506,7 +565,9 @@ CREATE TABLE public.git_credentials (
     secret_enc text NOT NULL,
     fingerprint text,
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp(3) with time zone NOT NULL
+    updated_at timestamp(3) with time zone NOT NULL,
+    login text,
+    scopes text[] DEFAULT ARRAY[]::text[]
 );
 
 
@@ -838,6 +899,22 @@ ALTER TABLE ONLY public.backup_schedules
 
 
 --
+-- Name: checklist_checks checklist_checks_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: checklist_items checklist_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_items
+    ADD CONSTRAINT checklist_items_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: database_snapshots database_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1055,6 +1132,34 @@ CREATE INDEX backup_schedules_enabled_next_run_at_idx ON public.backup_schedules
 --
 
 CREATE UNIQUE INDEX backup_schedules_environment_id_volume_name_key ON public.backup_schedules USING btree (environment_id, volume_name);
+
+
+--
+-- Name: checklist_checks_deployment_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX checklist_checks_deployment_id_idx ON public.checklist_checks USING btree (deployment_id);
+
+
+--
+-- Name: checklist_checks_item_id_deployment_id_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX checklist_checks_item_id_deployment_id_key ON public.checklist_checks USING btree (item_id, deployment_id);
+
+
+--
+-- Name: checklist_items_environment_id_created_at_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX checklist_items_environment_id_created_at_idx ON public.checklist_items USING btree (environment_id, created_at);
+
+
+--
+-- Name: checklist_items_environment_id_seed_key_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX checklist_items_environment_id_seed_key_key ON public.checklist_items USING btree (environment_id, seed_key) WHERE (seed_key IS NOT NULL);
 
 
 --
@@ -1426,6 +1531,54 @@ ALTER TABLE ONLY public.backup_schedules
 
 
 --
+-- Name: checklist_checks checklist_checks_checked_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_checked_by_user_id_fkey FOREIGN KEY (checked_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: checklist_checks checklist_checks_deployment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_deployment_id_fkey FOREIGN KEY (deployment_id) REFERENCES public.deployments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: checklist_checks checklist_checks_finding_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_finding_id_fkey FOREIGN KEY (finding_id) REFERENCES public.findings(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: checklist_checks checklist_checks_item_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_checks
+    ADD CONSTRAINT checklist_checks_item_id_fkey FOREIGN KEY (item_id) REFERENCES public.checklist_items(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: checklist_items checklist_items_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_items
+    ADD CONSTRAINT checklist_items_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- Name: checklist_items checklist_items_environment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.checklist_items
+    ADD CONSTRAINT checklist_items_environment_id_fkey FOREIGN KEY (environment_id) REFERENCES public.environments(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: database_snapshots database_snapshots_database_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1685,5 +1838,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict HaYOCs8uJeoWMiuUL2DsuukJxFCbBNXGuJejxttsglxiKCyUnBfepVbp8RClnMh
+\unrestrict 0WcjkH9AEnScuPci8tuqLBZFD24wrM4M6FIeEOadihqUl8CwJs06KCLkni3zKfK
 

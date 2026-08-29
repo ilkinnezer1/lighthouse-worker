@@ -44,3 +44,9 @@ WHERE deployment_id = $1;
 SELECT id, name, image, container_id
 FROM services
 WHERE deployment_id = $1;
+
+-- name: ListServiceContainersByDeployment :many
+SELECT name, container_id, is_web
+FROM services
+WHERE deployment_id = $1
+ORDER BY name;

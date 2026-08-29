@@ -96,6 +96,39 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) er
 	return err
 }
 
+const listServiceContainersByDeployment = `-- name: ListServiceContainersByDeployment :many
+SELECT name, container_id, is_web
+FROM services
+WHERE deployment_id = $1
+ORDER BY name
+`
+
+type ListServiceContainersByDeploymentRow struct {
+	Name        string
+	ContainerID *string
+	IsWeb       bool
+}
+
+func (q *Queries) ListServiceContainersByDeployment(ctx context.Context, deploymentID pgtype.UUID) ([]ListServiceContainersByDeploymentRow, error) {
+	rows, err := q.db.Query(ctx, listServiceContainersByDeployment, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListServiceContainersByDeploymentRow
+	for rows.Next() {
+		var i ListServiceContainersByDeploymentRow
+		if err := rows.Scan(&i.Name, &i.ContainerID, &i.IsWeb); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServicesByDeployment = `-- name: ListServicesByDeployment :many
 SELECT id, name, image, container_id
 FROM services
