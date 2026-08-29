@@ -38,11 +38,15 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		return err
 	}
 
-	if err := compose.InjectLabels(project, web, traefikLabels(dep, r.mode, port)); err != nil {
-		return fmt.Errorf("inject traefik labels: %w", err)
-	}
-	if err := compose.AttachExternalNetwork(project, web, publicNetwork); err != nil {
-		return fmt.Errorf("attach traefik network: %w", err)
+	if web == "" {
+		r.logLine(ctx, dep.ID, "no service exposes a port; deploying without a public route")
+	} else {
+		if err := compose.InjectLabels(project, web, traefikLabels(dep, r.mode, port)); err != nil {
+			return fmt.Errorf("inject traefik labels: %w", err)
+		}
+		if err := compose.AttachExternalNetwork(project, web, publicNetwork); err != nil {
+			return fmt.Errorf("attach traefik network: %w", err)
+		}
 	}
 
 	// The compose web service is user-defined, so the auto-migrate step (which
@@ -75,7 +79,11 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		return fmt.Errorf("docker compose up: %w", err)
 	}
 
-	r.logLine(ctx, dep.ID, "compose project up: web service = "+web)
+	if web == "" {
+		r.logLine(ctx, dep.ID, "compose project up: no web service")
+	} else {
+		r.logLine(ctx, dep.ID, "compose project up: web service = "+web)
+	}
 	if err := r.recordComposeServices(ctx, dep, project, web); err != nil {
 		return err
 	}
@@ -116,8 +124,13 @@ func isAlreadyInNetwork(err error) bool {
 
 // resolveWeb picks the public-facing compose service and its port. An explicit
 // buildConfig.web must name a real service; otherwise the web service is
-// auto-detected. buildConfig.port, when set, overrides the resolved port.
+// auto-detected. buildConfig.port, when set, overrides the resolved port. An
+// empty web with a nil error means the project has no web service at all — the
+// caller must then skip routing and the health check rather than guess a port.
 func resolveWeb(project *composetypes.Project, o buildOverrides) (web string, port int, err error) {
+	if len(project.Services) == 0 {
+		return "", 0, fmt.Errorf("compose project has no services")
+	}
 	if o.Web != "" {
 		if _, ok := project.Services[o.Web]; !ok {
 			return "", 0, fmt.Errorf("buildConfig.web=%q but no such service in compose", o.Web)
@@ -125,9 +138,15 @@ func resolveWeb(project *composetypes.Project, o buildOverrides) (web string, po
 		web, port = o.Web, compose.ServicePort(project, o.Web)
 	} else {
 		web, port = compose.WebService(project, defaultPort)
+		// A compose service reachable through Traefik needs no `ports:` of its
+		// own, so an explicit buildConfig.port is the user supplying the signal
+		// the compose file omits — without one, nothing here is web-facing.
+		if web == "" && o.Port != 0 {
+			web = compose.FirstService(project)
+		}
 	}
 	if web == "" {
-		return "", 0, fmt.Errorf("compose project has no services")
+		return "", 0, nil
 	}
 	if o.Port != 0 {
 		port = o.Port

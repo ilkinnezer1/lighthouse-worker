@@ -1353,16 +1353,17 @@ type Finding struct {
 }
 
 type GitCredential struct {
-	ID          pgtype.UUID
-	UserID      pgtype.UUID
-	Kind        GitCredentialKind
-	Label       *string
-	SecretEnc   string
-	Fingerprint *string
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-	Login       *string
-	Scopes      []string
+	ID             pgtype.UUID
+	UserID         pgtype.UUID
+	Kind           GitCredentialKind
+	Label          *string
+	SecretEnc      string
+	Fingerprint    *string
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	Login          *string
+	Scopes         []string
+	OrganizationID pgtype.UUID
 }
 
 type ManagedDatabase struct {
@@ -1453,14 +1454,15 @@ type OrgMembership struct {
 }
 
 type Organization struct {
-	ID               pgtype.UUID
-	Name             string
-	Slug             string
-	IsPersonal       bool
-	CreatedAt        pgtype.Timestamptz
-	UpdatedAt        pgtype.Timestamptz
-	AtlassianCloudID *string
-	AtlassianSiteUrl *string
+	ID                        pgtype.UUID
+	Name                      string
+	Slug                      string
+	IsPersonal                bool
+	CreatedAt                 pgtype.Timestamptz
+	UpdatedAt                 pgtype.Timestamptz
+	AtlassianCloudID          *string
+	AtlassianSiteUrl          *string
+	AllowMemberGitCredentials bool
 }
 
 type PrismaMigration struct {

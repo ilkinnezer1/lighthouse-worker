@@ -18,6 +18,7 @@ import (
 	"github.com/ilkinnezer1/lighthouse-worker/internal/database"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
 	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/gitauth"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/httpx"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logger"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
@@ -92,8 +93,9 @@ func run() int {
 		boot.Error("crypto init failed", slog.Any("err", err))
 		return 1
 	}
+	gitAuth := gitauth.NewResolver(q, cipher)
 	stageList := []pipeline.Stage{
-		stages.NewClone(q, cipher, logs),
+		stages.NewClone(gitAuth, logs),
 		stages.NewApplyFiles(q, cipher, logs),
 		stages.NewSetup(docker, logs, cipher),
 		stages.NewBuild(logs),
@@ -105,7 +107,7 @@ func run() int {
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
 	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
-	srv := httpx.New(cfg.HTTPAddr, root, docker, q, cipher, cfg.WorkDir)
+	srv := httpx.New(cfg.HTTPAddr, root, docker, q, gitAuth, cfg.WorkDir)
 
 	buildConsumer := queue.New(rdb, root, queue.Config{
 		Stream:   "jobs:build",

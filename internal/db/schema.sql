@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 0WcjkH9AEnScuPci8tuqLBZFD24wrM4M6FIeEOadihqUl8CwJs06KCLkni3zKfK
+\restrict ch54jD920OtbthEMfz5ALEPd8NUI5xvGAhGoEFxdQCUUu0EYprfnFLSdlvUZ7Ae
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -282,6 +282,20 @@ CREATE TYPE public."UserRole" AS ENUM (
 );
 
 
+--
+-- Name: delete_personal_git_credentials(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.delete_personal_git_credentials() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  DELETE FROM git_credentials WHERE user_id = OLD.id AND organization_id IS NULL;
+  RETURN OLD;
+END;
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -559,7 +573,7 @@ CREATE TABLE public.findings (
 
 CREATE TABLE public.git_credentials (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    user_id uuid NOT NULL,
+    user_id uuid,
     kind public."GitCredentialKind" NOT NULL,
     label text,
     secret_enc text NOT NULL,
@@ -567,7 +581,9 @@ CREATE TABLE public.git_credentials (
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
     login text,
-    scopes text[] DEFAULT ARRAY[]::text[]
+    scopes text[] DEFAULT ARRAY[]::text[],
+    organization_id uuid,
+    CONSTRAINT git_credentials_owner_present CHECK (((organization_id IS NOT NULL) OR (user_id IS NOT NULL)))
 );
 
 
@@ -705,7 +721,8 @@ CREATE TABLE public.organizations (
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp(3) with time zone NOT NULL,
     atlassian_cloud_id text,
-    atlassian_site_url text
+    atlassian_site_url text,
+    allow_member_git_credentials boolean DEFAULT true NOT NULL
 );
 
 
@@ -1268,6 +1285,13 @@ CREATE INDEX findings_deployment_id_status_idx ON public.findings USING btree (d
 
 
 --
+-- Name: git_credentials_organization_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX git_credentials_organization_id_idx ON public.git_credentials USING btree (organization_id);
+
+
+--
 -- Name: git_credentials_user_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1499,6 +1523,13 @@ CREATE UNIQUE INDEX webhook_deliveries_provider_delivery_id_key ON public.webhoo
 
 
 --
+-- Name: users users_delete_personal_git_credentials; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER users_delete_personal_git_credentials BEFORE DELETE ON public.users FOR EACH ROW EXECUTE FUNCTION public.delete_personal_git_credentials();
+
+
+--
 -- Name: audit_log audit_log_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1675,11 +1706,19 @@ ALTER TABLE ONLY public.findings
 
 
 --
+-- Name: git_credentials git_credentials_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.git_credentials
+    ADD CONSTRAINT git_credentials_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
 -- Name: git_credentials git_credentials_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.git_credentials
-    ADD CONSTRAINT git_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE CASCADE;
+    ADD CONSTRAINT git_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE SET NULL;
 
 
 --
@@ -1838,5 +1877,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 0WcjkH9AEnScuPci8tuqLBZFD24wrM4M6FIeEOadihqUl8CwJs06KCLkni3zKfK
+\unrestrict ch54jD920OtbthEMfz5ALEPd8NUI5xvGAhGoEFxdQCUUu0EYprfnFLSdlvUZ7Ae
 

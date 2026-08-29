@@ -216,12 +216,13 @@ func InjectLabels(project *types.Project, serviceName string, labels map[string]
 	return nil
 }
 
+// WebService picks the public-facing service: the one exposing the preferred
+// port, else the first that exposes any port. A project where nothing declares
+// a port has NO web service and returns ("", 0) — a queue consumer, cron runner
+// or bot is a legitimate unit with nothing to route at and nothing to probe,
+// and guessing a service here made us probe a port it never listened on.
 func WebService(project *types.Project, preferred int) (string, int) {
-	names := make([]string, 0, len(project.Services))
-	for name := range project.Services {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := sortedServiceNames(project)
 	for _, name := range names {
 		for _, p := range project.Services[name].Ports {
 			if int(p.Target) == preferred {
@@ -234,10 +235,25 @@ func WebService(project *types.Project, preferred int) (string, int) {
 			return name, int(ports[0].Target)
 		}
 	}
-	if len(names) > 0 {
-		return names[0], 0
-	}
 	return "", 0
+}
+
+// FirstService is the fallback for a caller that has an out-of-band reason to
+// believe a portless project is web-facing (an explicit buildConfig.port).
+func FirstService(project *types.Project) string {
+	if names := sortedServiceNames(project); len(names) > 0 {
+		return names[0]
+	}
+	return ""
+}
+
+func sortedServiceNames(project *types.Project) []string {
+	names := make([]string, 0, len(project.Services))
+	for name := range project.Services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func ServicePort(project *types.Project, name string) int {

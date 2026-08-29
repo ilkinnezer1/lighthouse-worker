@@ -9,10 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ilkinnezer1/lighthouse-worker/internal/crypto"
-	"github.com/ilkinnezer1/lighthouse-worker/internal/db"
-	dbgen "github.com/ilkinnezer1/lighthouse-worker/internal/db/gen"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/framework"
+	"github.com/ilkinnezer1/lighthouse-worker/internal/gitauth"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/logstream"
 	"github.com/ilkinnezer1/lighthouse-worker/internal/pipeline"
 )
@@ -26,31 +24,39 @@ const (
 // mergeTimeout bounds a single git merge so a pathological merge can't hang the build.
 const mergeTimeout = 10 * time.Minute
 
+// The line a deploy gets when its organization has no GitHub credential.
+// Spelled out because the alternative is an opaque git auth failure on the
+// clone, which reads as "the repo is broken" rather than "nobody set this up".
+const noOrgCredentialNotice = "no organization GitHub credential configured — " +
+	"public repositories still clone, a private one will fail authentication"
+
 type Clone struct {
-	q      *dbgen.Queries
-	cipher *crypto.Cipher
-	logs   *logstream.Writer
+	auth *gitauth.Resolver
+	logs *logstream.Writer
 }
 
-func NewClone(q *dbgen.Queries, cipher *crypto.Cipher, logs *logstream.Writer) *Clone {
-	return &Clone{q: q, cipher: cipher, logs: logs}
+func NewClone(auth *gitauth.Resolver, logs *logstream.Writer) *Clone {
+	return &Clone{auth: auth, logs: logs}
 }
 
 // remoteFor resolves dep.RepoURL into the git remote to clone from, injecting
-// the triggering user's GitHub OAuth token for private github.com HTTPS repos.
-// logSafe is the token-masked form and is the ONLY remote representation that
-// may be logged. Missing token or any decrypt error falls back to the bare
-// RepoURL so public clones keep working.
+// the credential the project's ORGANIZATION owns for private github.com HTTPS
+// repos — never the triggering member's own. logSafe is the token-masked form
+// and is the ONLY remote representation that may be logged. No credential falls
+// back to the bare RepoURL so public clones keep working.
 func (c *Clone) remoteFor(ctx context.Context, dep *pipeline.Deployment) (remote, logSafe string) {
-	enc, err := c.q.GetGithubTokenForUser(ctx, db.MustUUID(dep.TriggeredByUserID))
-	if err != nil || enc == nil {
-		return dep.RepoURL, dep.RepoURL
-	}
-	token, err := c.cipher.Decrypt(*enc)
+	cred, err := c.auth.ForProject(ctx, dep.ProjectID)
 	if err != nil {
+		_ = c.logs.WriteLine(ctx, dep.ID, "clone", "git credential unavailable: "+err.Error())
 		return dep.RepoURL, dep.RepoURL
 	}
-	return authedRemote(dep.RepoURL, token)
+	if cred.Token == "" {
+		if isGitHubHTTPS(dep.RepoURL) {
+			_ = c.logs.WriteLine(ctx, dep.ID, "clone", noOrgCredentialNotice)
+		}
+		return dep.RepoURL, dep.RepoURL
+	}
+	return authedRemote(dep.RepoURL, cred.Token)
 }
 
 func (*Clone) Name() string { return "clone" }
