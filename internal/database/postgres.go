@@ -75,7 +75,22 @@ func (r *Router) provisionPostgres(ctx context.Context, row dbgen.GetDatabaseRow
 	return host, port, connStr, nil
 }
 
+// pgRestore takes a custom-format archive or plain SQL, either optionally
+// gzipped. --no-owner/--no-acl because an imported archive names roles that do
+// not exist here; the managed database has a single owning role anyway.
 func (r *Router) pgRestore(ctx context.Context, containerName, dbName string, src io.Reader) error {
+	body, custom, err := postgresRestoreStream(src)
+	if err != nil {
+		return err
+	}
+	if custom {
+		return r.execWithStdin(ctx, containerName,
+			[]string{"pg_restore", "--clean", "--if-exists", "--no-owner", "--no-acl", "-U", postgresUser, "-d", dbName}, nil, body)
+	}
+	return r.psqlStdin(ctx, containerName, dbName, body)
+}
+
+func (r *Router) psqlStdin(ctx context.Context, containerName, dbName string, src io.Reader) error {
 	return r.execWithStdin(ctx, containerName,
-		[]string{"pg_restore", "--clean", "--if-exists", "-U", postgresUser, "-d", dbName}, nil, src)
+		[]string{"psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-U", postgresUser, "-d", dbName, "-f", "-"}, nil, src)
 }

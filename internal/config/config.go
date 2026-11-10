@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -27,6 +28,7 @@ type Config struct {
 	MinIOBucket         string
 	SweepInterval       time.Duration
 	SweepRetention      time.Duration
+	DBImportMaxBytes    int64
 }
 
 func Load() (*Config, error) {
@@ -52,6 +54,10 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if cfg.SweepRetention, err = getDuration("SWEEP_RETENTION", sweeper.DefaultRetention); err != nil {
+		return nil, err
+	}
+
+	if cfg.DBImportMaxBytes, err = getPositiveInt("DB_IMPORT_MAX_BYTES", defaultDBImportMaxBytes); err != nil {
 		return nil, err
 	}
 
@@ -84,6 +90,20 @@ func Load() (*Config, error) {
 	cfg.WorkDir = abs
 
 	return cfg, nil
+}
+
+const defaultDBImportMaxBytes = 5 << 30
+
+func getPositiveInt(key string, fallback int64) (int64, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", key, raw)
+	}
+	return n, nil
 }
 
 func getEnv(key, fallback string) string {

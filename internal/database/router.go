@@ -32,15 +32,19 @@ type Router struct {
 	crypto *crypto.Cipher
 	mc     *minio.Client
 	log    *slog.Logger
+
+	importMaxBytes int64
 }
 
-func NewRouter(docker *client.Client, q *dbgen.Queries, cipher *crypto.Cipher, mc *minio.Client, log *slog.Logger) *Router {
+func NewRouter(docker *client.Client, q *dbgen.Queries, cipher *crypto.Cipher, mc *minio.Client, log *slog.Logger, importMaxBytes int64) *Router {
 	return &Router{
 		docker: docker,
 		q:      q,
 		crypto: cipher,
 		mc:     mc,
 		log:    logger.Ctx(log, "Database"),
+
+		importMaxBytes: importMaxBytes,
 	}
 }
 

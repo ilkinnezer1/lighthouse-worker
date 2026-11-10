@@ -20,7 +20,7 @@ type Server struct {
 	log *slog.Logger
 }
 
-func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries, auth *gitauth.Resolver, workDir string) *Server {
+func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries, auth *gitauth.Resolver, imports ImportStore, workDir string) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -37,6 +37,7 @@ func New(addr string, log *slog.Logger, docker *client.Client, q *dbgen.Queries,
 	mux.HandleFunc("POST /deployments/{id}/hibernate", hibernationAction(docker, q, logger.Ctx(log, "Hibernate"), actionHibernate))
 	mux.HandleFunc("POST /deployments/{id}/wake", hibernationAction(docker, q, logger.Ctx(log, "Wake"), actionWake))
 	mux.HandleFunc("GET /databases/state", databaseStates(docker, logger.Ctx(log, "DatabaseState")))
+	mux.HandleFunc("PUT /databases/{id}/snapshots/{snapshotId}/upload", importUpload(imports, logger.Ctx(log, "ImportUpload")))
 	mux.HandleFunc("GET /environments/{id}/volumes", environmentVolumes(docker, logger.Ctx(log, "Volumes")))
 	mux.HandleFunc("DELETE /environments/{id}/volumes/{name}", deleteEnvironmentVolume(docker, logger.Ctx(log, "Volumes")))
 	mux.HandleFunc("POST /merge-check", mergeCheck(auth, logger.Ctx(log, "MergeCheck")))

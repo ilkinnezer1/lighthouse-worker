@@ -1,13 +1,12 @@
 package database
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
-	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -29,6 +28,8 @@ func snapshotExt(t dbgen.DatabaseType) string {
 		return "dump"
 	}
 }
+
+const stderrTailBytes = 4096
 
 type engineCreds struct {
 	user string
@@ -101,10 +102,16 @@ func (r *Router) dumpStream(
 	}
 }
 
-// restoreInto replaces the database's contents with a dump.
-func (r *Router) restoreInto(ctx context.Context, row dbgen.GetDatabaseRow, name string, src io.Reader) error {
+// restoreInto loads a dump into the database. With replace, the target schema is
+// emptied first so objects the dump does not mention do not survive it.
+func (r *Router) restoreInto(ctx context.Context, row dbgen.GetDatabaseRow, name string, src io.Reader, replace bool) error {
 	switch row.Type {
 	case dbgen.DatabaseTypePOSTGRES:
+		if replace {
+			if err := r.emptyPostgres(ctx, name, row.Name); err != nil {
+				return err
+			}
+		}
 		return r.pgRestore(ctx, name, row.Name, src)
 
 	case dbgen.DatabaseTypeMYSQL:
@@ -112,8 +119,17 @@ func (r *Router) restoreInto(ctx context.Context, row dbgen.GetDatabaseRow, name
 		if err != nil {
 			return err
 		}
+		if replace {
+			if err := r.emptyMysql(ctx, name, row.Name, c); err != nil {
+				return err
+			}
+		}
+		body, err := mysqlRestoreStream(src)
+		if err != nil {
+			return err
+		}
 		return r.execWithStdin(ctx, name,
-			[]string{"mysql", "-u", c.user, row.Name}, []string{"MYSQL_PWD=" + c.pass}, src)
+			[]string{"mysql", "-u", c.user, row.Name}, []string{"MYSQL_PWD=" + c.pass}, body)
 
 	case dbgen.DatabaseTypeMONGO:
 		c, err := r.credsFor(row)
@@ -157,31 +173,46 @@ func (r *Router) execStream(
 	}
 
 	pr, pw := io.Pipe()
-	var stderr bytes.Buffer
+	stderr := newTailBuffer(stderrTailBytes)
 	drained := make(chan struct{})
 	go func() {
 		defer close(drained)
-		_, copyErr := stdcopy.StdCopy(pw, &stderr, attach.Reader)
+		_, copyErr := stdcopy.StdCopy(pw, stderr, attach.Reader)
 		_ = pw.CloseWithError(copyErr)
 	}()
 
 	finish := func() error {
 		<-drained
 		attach.Close()
-		info, err := r.docker.ContainerExecInspect(ctx, exec.ID)
+		exitCode, err := r.execExitCode(ctx, exec.ID)
 		if err != nil {
-			return fmt.Errorf("exec inspect: %w", err)
+			return err
 		}
-		if info.ExitCode != 0 {
-			return fmt.Errorf("%s exit %d: %s", cmd[0], info.ExitCode, strings.TrimSpace(stderr.String()))
+		if exitCode != 0 {
+			return fmt.Errorf("%s exit %d: %s", cmd[0], exitCode, stderr.String())
 		}
 		return nil
 	}
 	return pr, finish, nil
 }
 
+func (r *Router) execOutput(ctx context.Context, containerName string, cmd []string, env []string) ([]byte, error) {
+	out, finish, err := r.execStream(ctx, containerName, cmd, env)
+	if err != nil {
+		return nil, err
+	}
+	data, readErr := io.ReadAll(out)
+	if err := finish(); err != nil {
+		return nil, err
+	}
+	if readErr != nil {
+		return nil, fmt.Errorf("read %s output: %w", cmd[0], readErr)
+	}
+	return data, nil
+}
+
 // execWithStdin runs cmd in the container feeding src to its stdin, and fails on
-// a non-zero exit carrying whatever the tool wrote to stderr.
+// a non-zero exit carrying the tail of what the tool wrote to stderr.
 func (r *Router) execWithStdin(
 	ctx context.Context,
 	containerName string,
@@ -212,19 +243,44 @@ func (r *Router) execWithStdin(
 		copyErrCh <- err
 	}()
 
-	var stdout, stderr bytes.Buffer
-	if _, err := stdcopy.StdCopy(&stdout, &stderr, attach.Reader); err != nil {
-		return fmt.Errorf("read exec output: %w", err)
+	stderr := newTailBuffer(stderrTailBytes)
+	_, readErr := stdcopy.StdCopy(io.Discard, stderr, attach.Reader)
+
+	exitCode, err := r.execExitCode(ctx, exec.ID)
+	if err != nil {
+		return err
+	}
+	// The exit code is checked before the copy result: a tool that stops at the
+	// first bad statement closes its stdin, and the resulting broken pipe would
+	// otherwise hide the engine's own error.
+	if exitCode != 0 {
+		return fmt.Errorf("%s exit %d: %s", cmd[0], exitCode, stderr.String())
+	}
+	if readErr != nil {
+		return fmt.Errorf("read exec output: %w", readErr)
 	}
 	if err := <-copyErrCh; err != nil {
 		return fmt.Errorf("stream dump to exec: %w", err)
 	}
-	info, err := r.docker.ContainerExecInspect(ctx, exec.ID)
-	if err != nil {
-		return fmt.Errorf("exec inspect: %w", err)
-	}
-	if info.ExitCode != 0 {
-		return fmt.Errorf("%s exit %d: %s", cmd[0], info.ExitCode, strings.TrimSpace(stderr.String()))
-	}
 	return nil
+}
+
+// execExitCode waits out the short window where the output stream has closed
+// but Docker still reports the exec as running with a placeholder exit code.
+func (r *Router) execExitCode(ctx context.Context, execID string) (int, error) {
+	for i := 0; i < 50; i++ {
+		info, err := r.docker.ContainerExecInspect(ctx, execID)
+		if err != nil {
+			return 0, fmt.Errorf("exec inspect: %w", err)
+		}
+		if !info.Running {
+			return info.ExitCode, nil
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return 0, errors.New("exec still running after its output closed")
 }

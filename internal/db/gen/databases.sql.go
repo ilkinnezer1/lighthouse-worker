@@ -91,7 +91,7 @@ func (q *Queries) GetProjectBuildConfigByEnvironment(ctx context.Context, id pgt
 }
 
 const getSnapshot = `-- name: GetSnapshot :one
-SELECT id, database_id, status, storage_key, size_bytes
+SELECT id, database_id, status, storage_key, size_bytes, origin
 FROM database_snapshots
 WHERE id = $1
 `
@@ -102,6 +102,7 @@ type GetSnapshotRow struct {
 	Status     SnapshotStatus
 	StorageKey *string
 	SizeBytes  *int64
+	Origin     SnapshotOrigin
 }
 
 func (q *Queries) GetSnapshot(ctx context.Context, id pgtype.UUID) (GetSnapshotRow, error) {
@@ -113,6 +114,7 @@ func (q *Queries) GetSnapshot(ctx context.Context, id pgtype.UUID) (GetSnapshotR
 		&i.Status,
 		&i.StorageKey,
 		&i.SizeBytes,
+		&i.Origin,
 	)
 	return i, err
 }
@@ -205,6 +207,50 @@ func (q *Queries) MarkDatabaseReady(ctx context.Context, arg MarkDatabaseReadyPa
 	return err
 }
 
+const markImportStored = `-- name: MarkImportStored :execrows
+UPDATE database_snapshots
+SET status      = 'READY',
+    storage_key = $2,
+    size_bytes  = $3
+WHERE id = $1
+  AND origin = 'IMPORT'
+  AND status = 'PENDING'
+`
+
+type MarkImportStoredParams struct {
+	ID         pgtype.UUID
+	StorageKey *string
+	SizeBytes  *int64
+}
+
+func (q *Queries) MarkImportStored(ctx context.Context, arg MarkImportStoredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markImportStored, arg.ID, arg.StorageKey, arg.SizeBytes)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markImportUploadFailed = `-- name: MarkImportUploadFailed :exec
+UPDATE database_snapshots
+SET status        = 'FAILED',
+    import_status = 'FAILED',
+    error_summary = COALESCE(error_summary, $2)
+WHERE id = $1
+  AND origin = 'IMPORT'
+  AND status <> 'READY'
+`
+
+type MarkImportUploadFailedParams struct {
+	ID           pgtype.UUID
+	ErrorSummary *string
+}
+
+func (q *Queries) MarkImportUploadFailed(ctx context.Context, arg MarkImportUploadFailedParams) error {
+	_, err := q.db.Exec(ctx, markImportUploadFailed, arg.ID, arg.ErrorSummary)
+	return err
+}
+
 const markSnapshotFailed = `-- name: MarkSnapshotFailed :exec
 UPDATE database_snapshots
 SET status        = 'FAILED',
@@ -238,5 +284,24 @@ type MarkSnapshotReadyParams struct {
 
 func (q *Queries) MarkSnapshotReady(ctx context.Context, arg MarkSnapshotReadyParams) error {
 	_, err := q.db.Exec(ctx, markSnapshotReady, arg.ID, arg.StorageKey, arg.SizeBytes)
+	return err
+}
+
+const setImportStatus = `-- name: SetImportStatus :exec
+UPDATE database_snapshots
+SET import_status = $2,
+    error_summary = $3
+WHERE id = $1
+  AND origin = 'IMPORT'
+`
+
+type SetImportStatusParams struct {
+	ID           pgtype.UUID
+	ImportStatus *ImportStatus
+	ErrorSummary *string
+}
+
+func (q *Queries) SetImportStatus(ctx context.Context, arg SetImportStatusParams) error {
+	_, err := q.db.Exec(ctx, setImportStatus, arg.ID, arg.ImportStatus, arg.ErrorSummary)
 	return err
 }

@@ -43,7 +43,7 @@ SET status        = 'FAILED',
 WHERE id = $1;
 
 -- name: GetSnapshot :one
-SELECT id, database_id, status, storage_key, size_bytes
+SELECT id, database_id, status, storage_key, size_bytes, origin
 FROM database_snapshots
 WHERE id = $1;
 
@@ -59,3 +59,28 @@ UPDATE database_snapshots
 SET status        = 'FAILED',
     error_summary = $2
 WHERE id = $1;
+
+-- name: MarkImportStored :execrows
+UPDATE database_snapshots
+SET status      = 'READY',
+    storage_key = $2,
+    size_bytes  = $3
+WHERE id = $1
+  AND origin = 'IMPORT'
+  AND status = 'PENDING';
+
+-- name: MarkImportUploadFailed :exec
+UPDATE database_snapshots
+SET status        = 'FAILED',
+    import_status = 'FAILED',
+    error_summary = COALESCE(error_summary, $2)
+WHERE id = $1
+  AND origin = 'IMPORT'
+  AND status <> 'READY';
+
+-- name: SetImportStatus :exec
+UPDATE database_snapshots
+SET import_status = $2,
+    error_summary = $3
+WHERE id = $1
+  AND origin = 'IMPORT';

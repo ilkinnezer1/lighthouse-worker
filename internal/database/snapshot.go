@@ -81,17 +81,26 @@ func (r *Router) restore(ctx context.Context, databaseID, snapshotID string) err
 		return errors.New("restore job missing snapshotId")
 	}
 	snapID := db.MustUUID(snapshotID)
-	dbID := db.MustUUID(databaseID)
 
 	snap, err := r.q.GetSnapshot(ctx, snapID)
 	if err != nil {
 		return fmt.Errorf("get snapshot: %w", err)
 	}
+	imported := snap.Origin == dbgen.SnapshotOriginIMPORT
+
+	err = r.restoreSnapshot(ctx, databaseID, snapshotID, snap, imported)
+	if imported {
+		r.recordImportOutcome(ctx, snapID, err)
+	}
+	return err
+}
+
+func (r *Router) restoreSnapshot(ctx context.Context, databaseID, snapshotID string, snap dbgen.GetSnapshotRow, replace bool) error {
 	if snap.StorageKey == nil || *snap.StorageKey == "" {
 		return fmt.Errorf("snapshot %s has no storage_key", snapshotID)
 	}
 
-	dbRow, err := r.q.GetDatabase(ctx, dbID)
+	dbRow, err := r.q.GetDatabase(ctx, db.MustUUID(databaseID))
 	if err != nil {
 		return fmt.Errorf("get database: %w", err)
 	}
@@ -104,15 +113,32 @@ func (r *Router) restore(ctx context.Context, databaseID, snapshotID string) err
 	}
 	defer func() { _ = obj.Close() }()
 
-	if err := r.restoreInto(ctx, dbRow, containerName(databaseID), obj); err != nil {
+	if err := r.restoreInto(ctx, dbRow, containerName(databaseID), obj, replace); err != nil {
 		return fmt.Errorf("restore %s: %w", dbRow.Type, err)
 	}
 
 	if err := r.emit(ctx, eventSnapshotRestored, databaseID, map[string]any{"snapshotId": snapshotID}); err != nil {
 		log.Warn("outbox snapshot_restored event", slog.Any("err", err))
 	}
-	log.Info("snapshot restored")
+	log.Info("snapshot restored", slog.Bool("replace", replace))
 	return nil
+}
+
+func (r *Router) recordImportOutcome(ctx context.Context, snapID pgtype.UUID, restoreErr error) {
+	status := dbgen.ImportStatusSUCCEEDED
+	var summary *string
+	if restoreErr != nil {
+		status = dbgen.ImportStatusFAILED
+		msg := restoreErr.Error()
+		summary = &msg
+	}
+	if err := r.q.SetImportStatus(context.WithoutCancel(ctx), dbgen.SetImportStatusParams{
+		ID:           snapID,
+		ImportStatus: &status,
+		ErrorSummary: summary,
+	}); err != nil {
+		r.log.Error("record import outcome", slog.Any("err", err))
+	}
 }
 
 // snapshotDelete removes the stored dump. The key travels on the job because

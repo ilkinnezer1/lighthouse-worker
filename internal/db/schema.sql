@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict ch54jD920OtbthEMfz5ALEPd8NUI5xvGAhGoEFxdQCUUu0EYprfnFLSdlvUZ7Ae
+\restrict sfgKgxWuqw5HfVex5gtcgmifzLnfDWgd9SfJwaj9TKynM7egKkSb5Q0HRLraLbr
 
 -- Dumped from database version 16.10
 -- Dumped by pg_dump version 16.10
@@ -184,6 +184,18 @@ CREATE TYPE public."IdentityProvider" AS ENUM (
 
 
 --
+-- Name: ImportStatus; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."ImportStatus" AS ENUM (
+    'UPLOADING',
+    'RESTORING',
+    'SUCCEEDED',
+    'FAILED'
+);
+
+
+--
 -- Name: LogSnapshotStatus; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -226,6 +238,16 @@ CREATE TYPE public."OrgRole" AS ENUM (
     'ADMIN',
     'MEMBER',
     'VIEWER'
+);
+
+
+--
+-- Name: SnapshotOrigin; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public."SnapshotOrigin" AS ENUM (
+    'DUMP',
+    'IMPORT'
 );
 
 
@@ -423,7 +445,10 @@ CREATE TABLE public.database_snapshots (
     created_at timestamp(3) with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     is_baseline boolean DEFAULT false NOT NULL,
     label text,
-    automatic boolean DEFAULT false NOT NULL
+    automatic boolean DEFAULT false NOT NULL,
+    file_name text,
+    import_status public."ImportStatus",
+    origin public."SnapshotOrigin" DEFAULT 'DUMP'::public."SnapshotOrigin" NOT NULL
 );
 
 
@@ -1877,5 +1902,5 @@ ALTER TABLE ONLY public.volume_backups
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ch54jD920OtbthEMfz5ALEPd8NUI5xvGAhGoEFxdQCUUu0EYprfnFLSdlvUZ7Ae
+\unrestrict sfgKgxWuqw5HfVex5gtcgmifzLnfDWgd9SfJwaj9TKynM7egKkSb5Q0HRLraLbr
 

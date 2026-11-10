@@ -717,6 +717,61 @@ func (e IdentityProvider) Valid() bool {
 	return false
 }
 
+type ImportStatus string
+
+const (
+	ImportStatusUPLOADING ImportStatus = "UPLOADING"
+	ImportStatusRESTORING ImportStatus = "RESTORING"
+	ImportStatusSUCCEEDED ImportStatus = "SUCCEEDED"
+	ImportStatusFAILED    ImportStatus = "FAILED"
+)
+
+func (e *ImportStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ImportStatus(s)
+	case string:
+		*e = ImportStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ImportStatus: %T", src)
+	}
+	return nil
+}
+
+type NullImportStatus struct {
+	ImportStatus ImportStatus
+	Valid        bool // Valid is true if ImportStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullImportStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.ImportStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ImportStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullImportStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ImportStatus), nil
+}
+
+func (e ImportStatus) Valid() bool {
+	switch e {
+	case ImportStatusUPLOADING,
+		ImportStatusRESTORING,
+		ImportStatusSUCCEEDED,
+		ImportStatusFAILED:
+		return true
+	}
+	return false
+}
+
 type LogSnapshotStatus string
 
 const (
@@ -928,6 +983,57 @@ func (e OrgRole) Valid() bool {
 		OrgRoleADMIN,
 		OrgRoleMEMBER,
 		OrgRoleVIEWER:
+		return true
+	}
+	return false
+}
+
+type SnapshotOrigin string
+
+const (
+	SnapshotOriginDUMP   SnapshotOrigin = "DUMP"
+	SnapshotOriginIMPORT SnapshotOrigin = "IMPORT"
+)
+
+func (e *SnapshotOrigin) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SnapshotOrigin(s)
+	case string:
+		*e = SnapshotOrigin(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SnapshotOrigin: %T", src)
+	}
+	return nil
+}
+
+type NullSnapshotOrigin struct {
+	SnapshotOrigin SnapshotOrigin
+	Valid          bool // Valid is true if SnapshotOrigin is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSnapshotOrigin) Scan(value interface{}) error {
+	if value == nil {
+		ns.SnapshotOrigin, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SnapshotOrigin.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSnapshotOrigin) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SnapshotOrigin), nil
+}
+
+func (e SnapshotOrigin) Valid() bool {
+	switch e {
+	case SnapshotOriginDUMP,
+		SnapshotOriginIMPORT:
 		return true
 	}
 	return false
@@ -1259,6 +1365,9 @@ type DatabaseSnapshot struct {
 	IsBaseline   bool
 	Label        *string
 	Automatic    bool
+	FileName     *string
+	ImportStatus *ImportStatus
+	Origin       SnapshotOrigin
 }
 
 type Deployment struct {

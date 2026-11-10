@@ -107,7 +107,14 @@ func run() int {
 	pipe := pipeline.NewPipeline(q, root, stageList, cancelListener)
 	runner := pipeline.NewRunner(q, pipe, root, cfg.WorkDir, mode, cfg.BaseDomain)
 
-	srv := httpx.New(cfg.HTTPAddr, root, docker, q, gitAuth, cfg.WorkDir)
+	mc, err := minio.New(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, false, root)
+	if err != nil {
+		boot.Error("minio init failed", slog.Any("err", err))
+		return 1
+	}
+	databaseRouter := database.NewRouter(docker, q, cipher, mc, root, cfg.DBImportMaxBytes)
+
+	srv := httpx.New(cfg.HTTPAddr, root, docker, q, gitAuth, databaseRouter, cfg.WorkDir)
 
 	buildConsumer := queue.New(rdb, root, queue.Config{
 		Stream:   "jobs:build",
@@ -124,12 +131,6 @@ func run() int {
 		LogLabel: "Queue.teardown",
 	}, teardownRunner.Run)
 
-	mc, err := minio.New(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey, cfg.MinIOBucket, false, root)
-	if err != nil {
-		boot.Error("minio init failed", slog.Any("err", err))
-		return 1
-	}
-	databaseRouter := database.NewRouter(docker, q, cipher, mc, root)
 	databaseConsumer := queue.NewFields(rdb, root, queue.Config{
 		Stream:   "jobs:database",
 		Group:    "worker",
