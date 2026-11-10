@@ -16,15 +16,62 @@ import (
 // FileNames are the recognized compose file names, in priority order.
 var FileNames = []string{"compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"}
 
-// Parse loads the first compose file found in workDir and returns the resolved
-// project using the given project name. Errors if no compose file exists.
-func Parse(ctx context.Context, workDir, projectName string) (*types.Project, error) {
-	return ParseAt(ctx, workDir, "", projectName)
+// Parse loads the compose file at relPath (relative to workDir) and returns the
+// resolved project. An empty relPath falls back to default discovery. vars layer
+// over the repo's .env for ${...} interpolation, so a variable set on the
+// environment resolves the same way one committed to .env does.
+func Parse(ctx context.Context, workDir, relPath, projectName string, vars map[string]string) (*types.Project, error) {
+	project, err := load(ctx, workDir, relPath, projectName, vars)
+	if err == nil {
+		return project, nil
+	}
+	// A stack whose compose pulls in sibling repos cannot work here — a project
+	// deploys one repository — and compose-go reports it as a bare "open ...:
+	// no such file". Loading again without includes proves which one it was.
+	if _, skipped := load(ctx, workDir, relPath, projectName, vars, func(o *loader.Options) {
+		o.SkipInclude = true
+	}); skipped == nil {
+		return nil, fmt.Errorf("compose include could not be resolved (a project deploys one repository): %w", err)
+	}
+	return nil, err
 }
 
-// ParseAt loads the compose file at relPath (relative to workDir) and returns
-// the resolved project. An empty relPath falls back to default discovery.
-func ParseAt(ctx context.Context, workDir, relPath, projectName string) (*types.Project, error) {
+// DeclaredEnvFiles returns the env_file paths the compose file names, as written.
+// Resolving the environment is what reads those paths off disk and fails when one
+// is missing — the condition the caller exists to fix — so this load skips it.
+func DeclaredEnvFiles(ctx context.Context, workDir, relPath, projectName string, vars map[string]string) ([]string, error) {
+	project, err := load(ctx, workDir, relPath, projectName, vars, func(o *loader.Options) {
+		o.SkipResolveEnvironment = true
+	})
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	seen := map[string]bool{}
+	for _, name := range sortedServiceNames(project) {
+		for _, f := range project.Services[name].EnvFiles {
+			rel := relativeTo(workDir, f.Path)
+			if rel == "" || seen[rel] {
+				continue
+			}
+			seen[rel] = true
+			paths = append(paths, rel)
+		}
+	}
+	return paths, nil
+}
+
+// relativeTo re-relativizes a loader-resolved path. Anything that does not sit
+// under workDir is returned as-is, so the caller can refuse it on sight.
+func relativeTo(workDir, path string) string {
+	rel, err := filepath.Rel(workDir, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		return path
+	}
+	return rel
+}
+
+func load(ctx context.Context, workDir, relPath, projectName string, vars map[string]string, opts ...func(*loader.Options)) (*types.Project, error) {
 	file, err := resolveFile(workDir, relPath)
 	if err != nil {
 		return nil, err
@@ -33,13 +80,14 @@ func ParseAt(ctx context.Context, workDir, relPath, projectName string) (*types.
 	if err != nil {
 		return nil, fmt.Errorf("read compose file: %w", err)
 	}
+	options := append([]func(*loader.Options){func(o *loader.Options) {
+		o.SetProjectName(projectName, true)
+	}}, opts...)
 	project, err := loader.LoadWithContext(ctx, types.ConfigDetails{
 		WorkingDir:  workDir,
 		ConfigFiles: []types.ConfigFile{{Filename: file, Content: content}},
-		Environment: dotEnv(workDir),
-	}, func(o *loader.Options) {
-		o.SetProjectName(projectName, true)
-	})
+		Environment: interpolationEnv(workDir, vars),
+	}, options...)
 	if err != nil {
 		return nil, fmt.Errorf("load compose: %w", err)
 	}
@@ -72,6 +120,16 @@ func resolveFile(workDir, relPath string) (string, error) {
 		return "", fmt.Errorf("compose file %s: %w", clean, err)
 	}
 	return path, nil
+}
+
+// interpolationEnv is the repo's .env with the deployment's own variables layered
+// on top: the environment's stored vars outrank anything committed to the repo.
+func interpolationEnv(workDir string, vars map[string]string) types.Mapping {
+	env := dotEnv(workDir)
+	for k, v := range vars {
+		env[k] = v
+	}
+	return env
 }
 
 func dotEnv(workDir string) types.Mapping {
@@ -131,6 +189,38 @@ func AttachExternalNetwork(project *types.Project, serviceName, networkName stri
 	svc.Networks[networkName] = nil
 	project.Services[serviceName] = svc
 	return nil
+}
+
+// ExternalNetworks and ExternalVolumes name the resources the compose file
+// expects to already exist. Compose refuses to create them and fails with a bare
+// docker error, so the caller creates them first.
+func ExternalNetworks(project *types.Project) []string {
+	var out []string
+	for key, net := range project.Networks {
+		if net.External {
+			out = append(out, resourceName(net.Name, key))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func ExternalVolumes(project *types.Project) []string {
+	var out []string
+	for key, vol := range project.Volumes {
+		if vol.External {
+			out = append(out, resourceName(vol.Name, key))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func resourceName(explicit, key string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return key
 }
 
 // Normalize rewrites a parsed project for isolated per-deployment runs. Strip

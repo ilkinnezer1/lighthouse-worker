@@ -27,7 +27,14 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 	if len(o.Volumes) > 0 {
 		r.logLine(ctx, dep.ID, "note: buildConfig volumes are not applied to compose deploys — declare volumes in your compose file instead")
 	}
-	project, err := compose.ParseAt(ctx, dep.WorkDir, o.ComposePath, composeProject(dep.ID))
+	// The compose web service is user-defined, so the auto-migrate step (which
+	// execs into a known single container) is limited to the image path; a
+	// Laravel compose deploy still gets DB_* / APP_KEY via deployEnvs.
+	envs, _, err := r.deployEnvs(ctx, dep, o)
+	if err != nil {
+		return err
+	}
+	project, err := compose.Parse(ctx, dep.WorkDir, o.ComposePath, composeProject(dep.ID), envs)
 	if err != nil {
 		return fmt.Errorf("parse compose: %w", err)
 	}
@@ -49,18 +56,14 @@ func (r *Run) runCompose(ctx context.Context, dep *pipeline.Deployment, o buildO
 		}
 	}
 
-	// The compose web service is user-defined, so the auto-migrate step (which
-	// execs into a known single container) is limited to the image path; a
-	// Laravel compose deploy still gets DB_* / APP_KEY via deployEnvs.
-	envs, _, err := r.deployEnvs(ctx, dep, o)
-	if err != nil {
-		return err
-	}
 	if len(envs) > 0 {
 		compose.InjectEnv(project, envs)
 	}
 
 	if err := r.ensureNetwork(ctx, publicNetwork); err != nil {
+		return err
+	}
+	if err := r.ensureExternalResources(ctx, dep, project); err != nil {
 		return err
 	}
 

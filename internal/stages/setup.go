@@ -23,11 +23,10 @@ const (
 	dockerSock        = "/var/run/docker.sock"
 )
 
-// Setup runs project-defined bootstrap commands after the file overlays are in
-// place and before the build, so a project's generator (e.g. `make setup`) can
-// produce its docker-compose.yml/.env from the user's env-vars. Each step runs
-// in a one-shot container with the deployment WorkDir bind-mounted at /app.
-// Empty/absent setupSteps make this a no-op.
+// Setup readies the workdir for the build: it runs the project's bootstrap
+// commands (e.g. `make setup`, which may itself generate docker-compose.yml),
+// then materialises any env_file the resulting compose file declares. Each step
+// runs in a one-shot container with the deployment WorkDir bind-mounted at /app.
 type Setup struct {
 	docker *client.Client
 	logs   *logstream.Writer
@@ -41,6 +40,13 @@ func NewSetup(docker *client.Client, logs *logstream.Writer, cipher *crypto.Ciph
 func (*Setup) Name() string { return "setup" }
 
 func (s *Setup) Run(ctx context.Context, dep *pipeline.Deployment) error {
+	if err := s.runSteps(ctx, dep); err != nil {
+		return err
+	}
+	return s.prepareEnvFiles(ctx, dep)
+}
+
+func (s *Setup) runSteps(ctx context.Context, dep *pipeline.Deployment) error {
 	steps := parseBuildOverrides(dep.BuildConfig).SetupSteps
 	if len(steps) == 0 {
 		return nil

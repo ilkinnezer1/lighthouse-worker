@@ -87,7 +87,7 @@ func (r *Run) Rollback(ctx context.Context, dep *pipeline.Deployment) error {
 // also injects the DB_* / APP_KEY vars stock Laravel needs — see laravel.go —
 // and reports whether a post-start `artisan migrate` should run.
 func (r *Run) deployEnvs(ctx context.Context, dep *pipeline.Deployment, o buildOverrides) (envs map[string]string, migrate bool, err error) {
-	env, err := r.userEnvs(dep)
+	env, err := decodeUserEnvs(r.cipher, dep.EnvVarsEnc)
 	if err != nil {
 		return nil, false, err
 	}
@@ -107,15 +107,9 @@ func (r *Run) deployEnvs(ctx context.Context, dep *pipeline.Deployment, o buildO
 	return env, migrate, nil
 }
 
-// userEnvs decrypts the environment's env_vars_enc blob — an AES-256-GCM JSON
-// object { "KEY": "value", ... } in Nest's CryptoService layout — into a map.
-// Returns an empty (non-nil) map when unset.
-func (r *Run) userEnvs(dep *pipeline.Deployment) (map[string]string, error) {
-	return decodeUserEnvs(r.cipher, dep.EnvVarsEnc)
-}
-
-// decodeUserEnvs decrypts and parses an env_vars_enc blob into a map. Returns an
-// empty (non-nil) map when the blob is unset.
+// decodeUserEnvs decrypts an env_vars_enc blob — an AES-256-GCM JSON object
+// { "KEY": "value", ... } in Nest's CryptoService layout — into an empty
+// (non-nil) map when unset.
 func decodeUserEnvs(cipher *crypto.Cipher, enc *string) (map[string]string, error) {
 	out := map[string]string{}
 	if enc == nil || *enc == "" {

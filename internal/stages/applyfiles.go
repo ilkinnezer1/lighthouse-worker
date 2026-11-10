@@ -37,7 +37,7 @@ func (a *ApplyFiles) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	for _, row := range rows {
 		target, err := safeJoin(dep.WorkDir, row.Path)
 		if err != nil {
-			return err
+			return fmt.Errorf("managed file: %w", err)
 		}
 		content, err := a.cipher.Decrypt(row.ContentEnc)
 		if err != nil {
@@ -59,12 +59,12 @@ func (a *ApplyFiles) Run(ctx context.Context, dep *pipeline.Deployment) error {
 func safeJoin(workDir, rel string) (string, error) {
 	clean := filepath.Clean(rel)
 	if filepath.IsAbs(clean) {
-		return "", fmt.Errorf("managed file path %q must be relative", rel)
+		return "", fmt.Errorf("path %q must be relative", rel)
 	}
 	target := filepath.Join(workDir, clean)
 	base := filepath.Clean(workDir)
 	if target != base && !strings.HasPrefix(target, base+string(os.PathSeparator)) {
-		return "", fmt.Errorf("managed file path %q escapes workdir", rel)
+		return "", fmt.Errorf("path %q escapes workdir", rel)
 	}
 	return target, nil
 }
