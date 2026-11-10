@@ -31,12 +31,14 @@ const (
 type HealthCheck struct {
 	docker    *client.Client
 	inspector healthInspector
+	liveness  containerLiveness
 	q         *dbgen.Queries
 	logs      *logstream.Writer
 }
 
 func NewHealthCheck(docker *client.Client, q *dbgen.Queries, logs *logstream.Writer) *HealthCheck {
-	return &HealthCheck{docker: docker, inspector: dockerInspector{docker: docker}, q: q, logs: logs}
+	inspector := dockerInspector{docker: docker}
+	return &HealthCheck{docker: docker, inspector: inspector, liveness: inspector, q: q, logs: logs}
 }
 
 func (*HealthCheck) Name() string { return "health_check" }
@@ -73,31 +75,15 @@ func (h *HealthCheck) Run(ctx context.Context, dep *pipeline.Deployment) error {
 	url := fmt.Sprintf("http://%s:%d/", ip, target.port)
 	h.logLine(ctx, dep.ID, "health check: no container healthcheck; probing "+url)
 
-	httpClient := &http.Client{Timeout: healthProbe}
-	deadline := time.Now().Add(healthTimeout)
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		if err != nil {
-			return fmt.Errorf("build health probe request: %w", err)
-		}
-		resp, err := httpClient.Do(req)
-		if err == nil {
-			_ = resp.Body.Close()
-			h.logLine(ctx, dep.ID, fmt.Sprintf("health check: ok (HTTP %d)", resp.StatusCode))
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("health check timed out after %s: %w", healthTimeout, err)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(healthInterval):
-		}
+	prober := httpProber{
+		probe:    h.httpProbe(dep.ID, url),
+		liveness: h.liveness,
+		port:     target.port,
+		timeout:  healthTimeout,
+		interval: healthInterval,
+		log:      func(line string) { h.logLine(ctx, dep.ID, line) },
 	}
+	return prober.wait(ctx, target.containerID)
 }
 
 // healthTarget is what the web-service lookup resolved to. A non-empty skip is
@@ -240,6 +226,23 @@ func (h *HealthCheck) containerIP(ctx context.Context, containerID string) (stri
 		}
 	}
 	return "", fmt.Errorf("container %s has no network ip", containerID[:12])
+}
+
+func (h *HealthCheck) httpProbe(deploymentID, url string) func(context.Context) error {
+	httpClient := &http.Client{Timeout: healthProbe}
+	return func(ctx context.Context) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			return err
+		}
+		_ = resp.Body.Close()
+		h.logLine(ctx, deploymentID, fmt.Sprintf("health check: ok (HTTP %d)", resp.StatusCode))
+		return nil
+	}
 }
 
 func (*HealthCheck) Rollback(context.Context, *pipeline.Deployment) error { return nil }

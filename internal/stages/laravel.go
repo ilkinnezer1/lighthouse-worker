@@ -110,8 +110,16 @@ func laravelAppKey(userSet string) (key string, generated bool, err error) {
 // can't tear down an otherwise-healthy release. The container is already
 // serving; a real schema failure surfaces here and in the app's own errors.
 func (r *Run) migrateLaravel(ctx context.Context, deploymentID, containerID string) {
+	if exit, err := inspectExit(ctx, r.docker, containerID); err == nil && exit.exited {
+		r.logLine(ctx, deploymentID, fmt.Sprintf("laravel: skipped migrate — the app container exited (code %d) right after starting", exit.code))
+		return
+	}
 	r.logLine(ctx, deploymentID, "laravel: running "+laravelMigrateCmd)
 	if err := r.execInContainer(ctx, deploymentID, containerID, laravelMigrateCmd); err != nil {
+		if exit, ierr := inspectExit(ctx, r.docker, containerID); ierr == nil && exit.exited {
+			r.logLine(ctx, deploymentID, fmt.Sprintf("laravel: migrate did not run — the app container exited (code %d)", exit.code))
+			return
+		}
 		r.logLine(ctx, deploymentID, "laravel: migrate did not complete cleanly (continuing) — "+err.Error())
 	}
 }
@@ -139,7 +147,7 @@ func (r *Run) execInContainer(ctx context.Context, deploymentID, containerID, co
 		_, _ = stdcopy.StdCopy(pw, pw, attach.Reader)
 		_ = pw.Close()
 	}()
-	streamLines(ctx, r.logs, deploymentID, "run", pr)
+	streamLines(ctx, r.logs, deploymentID, "run", dropRuntimeExecNoise(pr))
 
 	info, err := r.docker.ContainerExecInspect(ctx, execID.ID)
 	if err != nil {

@@ -3,7 +3,14 @@
 // standard Dockerfile path and target any legacy or current base-image version.
 package dockerfilegen
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
+
+// Laravel's cache and storage dirs are often gitignored whole, and the app
+// refuses to boot without them.
+const laravelWritableDirs = "mkdir -p bootstrap/cache storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs"
 
 // DefaultPort is the internal port a generated image listens on (via $PORT) and
 // that the run stage routes Traefik to when buildConfig sets no explicit port.
@@ -28,13 +35,11 @@ func Generate(srcDir, framework string, opts Options) (dockerfile string, port i
 	}
 	switch framework {
 	case "laravel":
-		base := "php:" + phpVersion(srcDir, opts.RuntimeVersion) + "-cli"
 		start := firstNonEmpty(opts.StartCommand, "php artisan serve --host 0.0.0.0 --port ${PORT}")
-		return phpDockerfile(base, opts.BuildCommand, start, port), port, nil
+		return phpDockerfile(srcDir, phpVersion(srcDir, opts.RuntimeVersion), laravelWritableDirs, opts.BuildCommand, start, port), port, nil
 	case "symfony":
-		base := "php:" + phpVersion(srcDir, opts.RuntimeVersion) + "-cli"
 		start := firstNonEmpty(opts.StartCommand, "php -S 0.0.0.0:${PORT} -t public")
-		return phpDockerfile(base, opts.BuildCommand, start, port), port, nil
+		return phpDockerfile(srcDir, phpVersion(srcDir, opts.RuntimeVersion), "", opts.BuildCommand, start, port), port, nil
 	case "node-prisma":
 		base := "node:" + nodeVersion(srcDir, opts.RuntimeVersion) + "-alpine"
 		start := firstNonEmpty(opts.StartCommand, "npm start")
@@ -54,22 +59,30 @@ func Generate(srcDir, framework string, opts Options) (dockerfile string, port i
 }
 
 // phpDockerfile serves Laravel/Symfony from php:<ver>-cli. Debian (not alpine) so
-// docker-php-ext-install works on legacy PHP where musl breaks old extension
-// builds; composer 2.2 is the LTS line that still runs on PHP 5.3.2+.
-func phpDockerfile(base, buildCmd, startCmd string, port int) string {
-	return fmt.Sprintf(`FROM %s
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        git unzip libzip-dev libpq-dev libonig-dev \
-    && docker-php-ext-install pdo pdo_mysql pdo_pgsql mbstring bcmath \
-    && rm -rf /var/lib/apt/lists/*
-COPY --from=composer:2.2 /usr/bin/composer /usr/bin/composer
+// legacy PHP extension builds work where musl breaks them. Install scripts run
+// separately because they boot the app without its runtime env or services;
+// dependency resolution itself must fail the build.
+func phpDockerfile(srcDir, phpVer, prepareCmd, buildCmd, startCmd string, port int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "FROM php:%s-cli\n", phpVer)
+	fmt.Fprintf(&b, "ADD %s /usr/local/bin/\n", phpExtInstallerURL)
+	b.WriteString(`RUN chmod +x /usr/local/bin/install-php-extensions \
+    && apt-get update && apt-get install -y --no-install-recommends git unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && install-php-extensions ` + strings.Join(phpExtensions(srcDir), " ") + "\n")
+	fmt.Fprintf(&b, "COPY --from=composer:%s /usr/bin/composer /usr/bin/composer\n", composerImageTag(phpVer))
+	b.WriteString(`ENV COMPOSER_ALLOW_SUPERUSER=1
 WORKDIR /app
 COPY . .
-RUN composer install --no-interaction --prefer-dist --no-progress || true
-%sENV PORT=%d
-EXPOSE %d
-CMD %s
-`, base, runLine(buildCmd), port, port, startCmd)
+`)
+	b.WriteString(runLine(prepareCmd))
+	b.WriteString("RUN composer install --no-interaction --prefer-dist --no-progress --no-scripts\n")
+	for _, hook := range composerScriptHooks(srcDir) {
+		fmt.Fprintf(&b, "RUN composer run-script %[1]s --no-interaction \\\n"+
+			"    || echo \"warning: composer %[1]s scripts failed at build time (no runtime env or services); continuing\" >&2\n", hook)
+	}
+	fmt.Fprintf(&b, "%sENV PORT=%d\nEXPOSE %d\nCMD %s\n", runLine(buildCmd), port, port, startCmd)
+	return b.String()
 }
 
 func nodeDockerfile(base, buildCmd, startCmd string, port int) string {
